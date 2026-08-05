@@ -157,22 +157,38 @@ function signedOut(): HTMLElement[] {
     marks.append(box);
   }
   welcome.append(marks);
-  welcome.append(el("h1", "Review your architecture"));
+  // The headline names what it does now, which is build. Reviewing came first
+  // and is still here, but leading on it undersells the thing to someone
+  // deciding in three seconds whether this is a code agent.
+  welcome.append(el("h1", "Build with your architecture in mind"));
   welcome.append(
     el(
       "p",
-      "IronBase maps how your code fits together, finds what will break as it grows, and writes the patches. Run it on an AI subscription you already pay for, an API key, or a model on your own machine.",
+      "Describe a change. IronBase maps your codebase, plans against it, then writes the code and runs your tests — on an AI account you already have.",
       "muted",
     ),
   );
   out.push(welcome);
 
+  // Three subscription sign-ins, then one row for the other nine.
+  //
+  // Twelve cards was a wall: it made a one-click Claude sign-in look like the
+  // same amount of work as configuring OpenRouter, and pushed the thing most
+  // people want below the fold. The rest are one click away in the picker,
+  // which is where choosing between them belongs anyway.
   out.push(el("h2", "Connect an account"));
-  for (const account of ACCOUNTS) out.push(accountCard(account, false, false));
+  const oauth = ACCOUNTS.filter((a) => PROVIDER_CREDENTIALS[a.id] === "oauth");
+  for (const account of oauth) out.push(accountCard(account, false, false));
+
+  const others = ACCOUNTS.length - oauth.length;
+  out.push(
+    linkButton(`${others} more — API keys, or a model on this machine`, "key", CONNECT),
+  );
+
   out.push(
     el(
       "div",
-      "Your sign-in is stored in the system keychain and is only ever sent to that provider.",
+      "Stored in your system keychain, and only ever sent to that provider.",
       "footnote",
     ),
   );

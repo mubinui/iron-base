@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { AuthManager, type ApiKeyProvider } from "./auth/authManager";
+import { ChatController } from "./chat/chatController";
 import { ChatPanel } from "./chat/chatPanel";
 import { getConfig, getGoogleClient } from "./config";
 import { runAnalysis, type ProgressEvent } from "./engine/agentLoop";
@@ -56,7 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarView.viewType, sidebar),
-    ChatPanel.registerOriginalProvider(),
+    ChatController.registerOriginalProvider(),
     auth.onDidChange(() => void refreshAuthState()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("ironbase")) void refreshAuthState();
@@ -68,6 +69,8 @@ export function activate(context: vscode.ExtensionContext): void {
     register("ironbase.switchBuild", () => withBuildPanel((panel) => panel.switchSession())),
     register("ironbase.exportBuild", () => withBuildPanel((panel) => panel.exportSession())),
     register("ironbase.revertRun", revertRun),
+    register("ironbase.buildInEditor", openBuildInEditor),
+    register("ironbase.buildHome", () => sidebar.showHome()),
     register("ironbase.connectAccount", connectAccount),
     register("ironbase.useConnectedAccount", useConnectedAccount),
     register("ironbase.signInAnthropic", signInAnthropic),
@@ -89,7 +92,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   activeRun?.cancel();
-  ChatPanel.active?.stopRun();
+  ChatController.active?.stopRun();
 }
 
 function register(command: string, handler: () => Promise<void> | void): vscode.Disposable {
@@ -183,7 +186,12 @@ async function openBuildPanel(): Promise<void> {
     await connectAccount();
     if (!(await auth.getActiveClient())) return;
   }
-  ChatPanel.show({ extensionUri, auth, indexStore, sessionStore });
+  // The sidebar, not an editor tab. You are already there when you ask for a
+  // build, and being thrown into a new tab to answer the first permission
+  // prompt is a context switch nobody asked for. `Open in editor` is in the
+  // build header for when a diff wants the room.
+  const controller = ChatController.forWorkspace({ extensionUri, auth, indexStore, sessionStore });
+  if (controller) sidebar.showBuild(controller);
 }
 
 /**
@@ -193,21 +201,30 @@ async function openBuildPanel(): Promise<void> {
  * open" is a state the person is trying to leave rather than one worth being
  * told about.
  */
-async function withBuildPanel(action: (panel: ChatPanel) => Promise<void> | void): Promise<void> {
-  const panel = ChatPanel.active ?? ChatPanel.show({ extensionUri, auth, indexStore, sessionStore });
-  if (panel) await action(panel);
+async function withBuildPanel(
+  action: (controller: ChatController) => Promise<void> | void,
+): Promise<void> {
+  const controller = ChatController.forWorkspace({ extensionUri, auth, indexStore, sessionStore });
+  if (!controller) return;
+  if (sidebar.currentScreen !== "build" && !ChatPanel.active) sidebar.showBuild(controller);
+  await action(controller);
 }
 
 /** Puts every file the current build session wrote back to how it started. */
 async function revertRun(): Promise<void> {
-  const panel = ChatPanel.active;
-  if (!panel) {
+  const controller = ChatController.active;
+  if (!controller) {
     void vscode.window.showInformationMessage(
-      "There is no build session to revert — the IronBase build panel is not open.",
+      "There is no build to revert — nothing has been built in this window yet.",
     );
     return;
   }
-  await panel.revertAll();
+  await controller.revertAll();
+}
+
+/** Moves the conversation into an editor tab, where a diff has room. */
+function openBuildInEditor(): void {
+  ChatPanel.show({ extensionUri, auth, indexStore, sessionStore });
 }
 
 // --- Analysis runs ---------------------------------------------------------
@@ -414,8 +431,8 @@ function cancelRun(): void {
     void vscode.window.showInformationMessage("Cancelling the review…");
     return;
   }
-  if (ChatPanel.active) {
-    ChatPanel.active.stopRun();
+  if (ChatController.active) {
+    ChatController.active.stopRun();
     return;
   }
   void vscode.window.showInformationMessage("Nothing is running.");

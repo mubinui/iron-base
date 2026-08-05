@@ -44,7 +44,9 @@ the patches as fenced diffs.
 
 ## Building something
 
-Click **Build something…** in the sidebar, or run `IronBase: Build…`.
+Click **Build something…** in the sidebar, or run `IronBase: Build…`. The conversation
+opens in the sidebar itself — **Open in editor** in its header moves it to a tab when a
+diff wants the room.
 
 ```
 you  ▸  move sessions out of process memory so this can run on two instances
@@ -271,6 +273,7 @@ inside the normal undo stack.
 | `IronBase: New Build` | Start a fresh conversation, keeping the undo history |
 | `IronBase: Past Builds…` | Reopen an earlier build in this workspace |
 | `IronBase: Export Build as Markdown` | Write the build out as a diff and a summary |
+| `IronBase: Open Build in Editor` | Move the conversation to a full editor tab |
 | `IronBase: Analyze Architecture` | Full architecture review |
 | `IronBase: Scalability Check…` | Review plus a capacity estimate for a target you name |
 | `IronBase: Connect Claude Account` | Sign in with Claude Pro/Max |

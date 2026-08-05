@@ -2,7 +2,7 @@
   "name": "ironbase",
   "displayName": "IronBase — AI Coding Agent",
   "description": "An AI coding agent that starts from your architecture. Plans a change, you approve it, then it writes the code and runs your tests — plus a full architecture review with a dependency map. Runs on the Claude, ChatGPT, or Gemini account you already have.",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {
@@ -87,6 +87,17 @@
         "category": "IronBase"
       },
       {
+        "command": "ironbase.buildInEditor",
+        "title": "Open Build in Editor",
+        "category": "IronBase",
+        "icon": "$(layers)"
+      },
+      {
+        "command": "ironbase.buildHome",
+        "title": "Back to Home",
+        "category": "IronBase"
+      },
+      {
         "command": "ironbase.connectAccount",
         "title": "Connect an Account…",
         "category": "IronBase"
@@ -157,6 +168,14 @@
         "category": "IronBase"
       }
     ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "ironbase.buildHome",
+          "when": "false"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

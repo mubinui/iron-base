@@ -42,6 +42,8 @@ export const ALLOWED_COMMANDS = [
   "ironbase.chooseModel",
   "ironbase.clearIndex",
   "ironbase.revertRun",
+  "ironbase.buildInEditor",
+  "ironbase.buildHome",
   "ironbase.signOutProvider",
   "ironbase.signOut",
 ] as const;

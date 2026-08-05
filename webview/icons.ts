@@ -15,6 +15,12 @@ export type IconName =
   | "chatgpt"
   | "gemini"
   | "key"
+  | "xai"
+  | "openrouter"
+  | "groq"
+  | "mistral"
+  | "kimi"
+  | "deepseek"
   | "server"
   | "signIn"
   | "signOut"
@@ -127,6 +133,65 @@ const GLYPHS: Record<IconName, Glyph> = {
       "M14.5 9.5 A4 4 0 1 0 10.9 13.1 L11 13 L13 15 L11 17 L13 19 L15.5 16.5 V13.5 L14.5 12.5",
     ],
     circles: [{ cx: 15.5, cy: 8.5, r: 1.4, fill: true }],
+  },
+
+  // Marks for the API-key providers.
+  //
+  // These all shared the generic key glyph, which made six rows of the account
+  // list identical — the one question a provider list has to answer at a glance
+  // is "which of these is which", and it could not. Each is a simplified,
+  // monochrome-safe evocation rather than a traced logo: shape carries the
+  // recognition, and the two where colour is genuinely part of the brand keep it.
+  xai: {
+    box: 24,
+    // xAI's slashed X: two slanted bars rather than a symmetrical cross, which
+    // is what keeps it from reading as a close button.
+    fills: [
+      { d: "M3 2.5 H7.6 L21 21.5 H16.4 Z" },
+      { d: "M21 2.5 H16.4 L3 21.5 H7.6 Z" },
+    ],
+  },
+  openrouter: {
+    box: 24,
+    // One input fanning out to several models — what the service does.
+    strokes: [
+      "M2.5 12 H7.5",
+      "M7.5 12 C 11.5 12, 11.5 6, 15.5 6",
+      "M7.5 12 C 11.5 12, 11.5 18, 15.5 18",
+    ],
+    circles: [
+      { cx: 6, cy: 12, r: 2.1, fill: true },
+      { cx: 18, cy: 6, r: 2.1 },
+      { cx: 18, cy: 18, r: 2.1 },
+    ],
+    width: 1.6,
+  },
+  groq: {
+    box: 24,
+    // A bolt, for the one thing Groq is bought for.
+    fills: [{ d: "M13.5 2 L5.5 13.5 H10.5 L9.8 22 L18.5 10 H13 Z" }],
+  },
+  mistral: {
+    box: 24,
+    // The banded flag, which is unmistakable even at 17px — and the one place
+    // in this set where dropping the colour would lose the recognition.
+    fills: [
+      { d: "M3 3.5 H21 V7.5 H3 Z", color: "#ffd800" },
+      { d: "M3 8.5 H21 V12.5 H3 Z", color: "#ffaf00" },
+      { d: "M3 13.5 H21 V17.5 H3 Z", color: "#ff8205" },
+      { d: "M3 18.5 H21 V21.5 H3 Z", color: "#fa500f" },
+    ],
+  },
+  kimi: {
+    box: 24,
+    // Moonshot's moon.
+    fills: [{ d: "M15.8 2.6 A 9.6 9.6 0 1 0 21.4 13 A 7.3 7.3 0 1 1 15.8 2.6 Z" }],
+  },
+  deepseek: {
+    box: 24,
+    strokes: ["M12 6.5 V15.5", "M8 11.5 L12 15.5 L16 11.5"],
+    circles: [{ cx: 12, cy: 12, r: 9.4 }],
+    width: 1.8,
   },
   server: {
     box: 24,
@@ -387,11 +452,11 @@ export const PROVIDER_ICONS: Record<string, IconName> = {
   "gemini-oauth": "gemini",
   "chatgpt-web": "chatgpt",
   openai: "chatgpt",
-  xai: "key",
-  openrouter: "key",
-  groq: "key",
-  mistral: "key",
-  kimi: "key",
-  deepseek: "key",
+  xai: "xai",
+  openrouter: "openrouter",
+  groq: "groq",
+  mistral: "mistral",
+  kimi: "kimi",
+  deepseek: "deepseek",
   ollama: "server",
 };

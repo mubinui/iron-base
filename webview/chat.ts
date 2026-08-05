@@ -183,6 +183,14 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
 function renderHead(): void {
   head.replaceChildren();
 
+  // Back to the account/review screen. The build lives in the sidebar now, so
+  // there has to be a way out of it that is not "close the whole view".
+  head.append(
+    iconButton("Back", "chevron", () =>
+      vscode.postMessage({ type: "command", command: "ironbase.buildHome" }),
+    ),
+  );
+
   // The session's own name, not the product's. Which build you are looking at
   // matters more here than which extension you are in.
   const title = el("span", state.sessionTitle || "New build", "title");
@@ -247,6 +255,10 @@ function renderHead(): void {
     head.append(
       iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
       iconButton("Past builds", "history", () => vscode.postMessage({ type: "switchSession" })),
+      // The sidebar is narrow; a long diff is easier to read across an editor.
+      iconButton("Open in editor", "layers", () =>
+        vscode.postMessage({ type: "command", command: "ironbase.buildInEditor" }),
+      ),
       iconButton("Export", "download", () => vscode.postMessage({ type: "exportSession" })),
     );
   }

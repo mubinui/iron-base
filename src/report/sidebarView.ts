@@ -1,13 +1,40 @@
+/**
+ * The sidebar: two screens in one view.
+ *
+ * Home is accounts and the two ways in. Build is the conversation. They swap in
+ * place rather than the build opening an editor tab, because the sidebar is
+ * where you already are when you ask for something — being thrown into a new
+ * tab to answer a permission prompt is a context switch nobody asked for.
+ *
+ * Swapping means replacing the webview's HTML, which throws away everything the
+ * page had. That is safe here only because neither screen owns its own state:
+ * home rebuilds from `SidebarState`, and the conversation is replayed from
+ * `ChatController` the moment the new page says it is ready.
+ */
+
 import * as vscode from "vscode";
-import { isAllowedCommand, type HostMessage, type SidebarState, type WebviewMessage } from "../protocol";
+import type { ChatController, ChatSurface } from "../chat/chatController";
+import { html as chatHtml } from "../chat/chatPanel";
+import {
+  isAllowedCommand,
+  type ChatHostMessage,
+  type ChatWebviewMessage,
+  type HostMessage,
+  type SidebarState,
+  type WebviewMessage,
+} from "../protocol";
 import { log } from "../util/log";
 import { createNonce } from "./reportPanel";
 import { SIDEBAR_STYLES } from "./styles";
 
-export class SidebarView implements vscode.WebviewViewProvider {
+export type SidebarScreen = "home" | "build";
+
+export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
   static readonly viewType = "ironbase.sidebar";
 
   private view: vscode.WebviewView | undefined;
+  private screen: SidebarScreen = "home";
+  private controller: ChatController | undefined;
   private state: SidebarState = {
     providerLabel: undefined,
     running: false,
@@ -23,24 +50,90 @@ export class SidebarView implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "dist")],
     };
-    view.webview.html = this.html(view.webview);
-    view.webview.onDidReceiveMessage((message: WebviewMessage) => {
-      if (message.type === "ready") {
-        this.post({ type: "state", state: this.state });
-      } else if (message.type === "command") {
-        if (isAllowedCommand(message.command)) {
-          void vscode.commands.executeCommand(message.command);
-        } else {
-          log.warn(`Sidebar asked for a command outside the allowlist: ${message.command}`);
-        }
-      }
+    view.onDidDispose(() => {
+      this.detachController();
+      this.view = undefined;
     });
-    this.post({ type: "state", state: this.state });
+    view.webview.onDidReceiveMessage((message: WebviewMessage | ChatWebviewMessage) =>
+      this.onMessage(message),
+    );
+    this.renderScreen();
   }
+
+  // --- Screens ---------------------------------------------------------------
+
+  /**
+   * Shows the conversation in the sidebar, attaching to the controller.
+   *
+   * Idempotent: asking for the build screen while it is already up just brings
+   * the sidebar forward, which is what the command should do on a second press.
+   */
+  showBuild(controller: ChatController): void {
+    this.reveal();
+    if (this.screen === "build" && this.controller === controller) return;
+    this.detachController();
+    this.controller = controller;
+    this.screen = "build";
+    this.renderScreen();
+  }
+
+  showHome(): void {
+    if (this.screen === "home") return;
+    this.detachController();
+    this.screen = "home";
+    this.renderScreen();
+  }
+
+  get currentScreen(): SidebarScreen {
+    return this.screen;
+  }
+
+  private detachController(): void {
+    if (!this.controller) return;
+    this.controller.detach(this);
+    this.controller = undefined;
+  }
+
+  /**
+   * Rebuilds the page for the current screen.
+   *
+   * The controller is attached only *after* the HTML is set: attaching replays
+   * the whole thread, and a page that has not loaded yet would drop it. The new
+   * page asks again with `ready` regardless, so this is belt and braces.
+   */
+  private renderScreen(): void {
+    const view = this.view;
+    if (!view) return;
+
+    view.webview.html =
+      this.screen === "build"
+        ? chatHtml(view.webview, this.extensionUri)
+        : this.homeHtml(view.webview);
+
+    if (this.screen === "build" && this.controller) {
+      this.controller.attach(this);
+    } else {
+      this.post({ type: "state", state: this.state });
+    }
+  }
+
+  // --- ChatSurface -----------------------------------------------------------
+
+  post(message: ChatHostMessage | HostMessage): void {
+    void this.view?.webview.postMessage(message);
+  }
+
+  reveal(): void {
+    void vscode.commands.executeCommand("ironbase.sidebar.focus");
+  }
+
+  // --- Home state ------------------------------------------------------------
 
   setState(patch: Partial<SidebarState>): void {
     this.state = { ...this.state, ...patch };
-    this.post({ type: "state", state: this.state });
+    // Only the home screen draws this. Posting it to the build page would be
+    // a message it has no case for.
+    if (this.screen === "home") this.post({ type: "state", state: this.state });
   }
 
   get currentState(): SidebarState {
@@ -48,26 +141,43 @@ export class SidebarView implements vscode.WebviewViewProvider {
   }
 
   appendText(delta: string): void {
-    this.post({ type: "progressText", delta });
+    if (this.screen === "home") this.post({ type: "progressText", delta });
   }
 
   noteTool(name: string): void {
-    this.post({ type: "progressTool", name });
+    if (this.screen === "home") this.post({ type: "progressTool", name });
   }
 
   noteWarning(text: string): void {
-    this.post({ type: "warning", text });
+    if (this.screen === "home") this.post({ type: "warning", text });
   }
 
-  reveal(): void {
-    void vscode.commands.executeCommand("ironbase.sidebar.focus");
+  // --- Messages --------------------------------------------------------------
+
+  private onMessage(message: WebviewMessage | ChatWebviewMessage): void {
+    // The build page's messages belong to the controller, and its own `ready`
+    // means "replay the thread" rather than "send me the sidebar state".
+    if (this.screen === "build" && this.controller) {
+      if (message.type === "command" && isAllowedCommand(message.command)) {
+        void vscode.commands.executeCommand(message.command);
+        return;
+      }
+      this.controller.handle(message as ChatWebviewMessage);
+      return;
+    }
+
+    if (message.type === "ready") {
+      this.post({ type: "state", state: this.state });
+    } else if (message.type === "command") {
+      if (isAllowedCommand(message.command)) {
+        void vscode.commands.executeCommand(message.command);
+      } else {
+        log.warn(`Sidebar asked for a command outside the allowlist: ${message.command}`);
+      }
+    }
   }
 
-  private post(message: HostMessage): void {
-    void this.view?.webview.postMessage(message);
-  }
-
-  private html(webview: vscode.Webview): string {
+  private homeHtml(webview: vscode.Webview): string {
     const nonce = createNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "dist", "sidebar.js"),
