@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { AuthManager, type ApiKeyProvider } from "./auth/authManager";
+import { ChatPanel } from "./chat/chatPanel";
 import { getConfig, getGoogleClient } from "./config";
 import { runAnalysis, type ProgressEvent } from "./engine/agentLoop";
 import type { AnalysisReport } from "./engine/findings";
@@ -19,6 +20,7 @@ import {
 import { buildDigest } from "./memory/digest";
 import { updateIndex } from "./memory/indexer";
 import { IndexStore, rememberFindings } from "./memory/store";
+import { SessionStore } from "./chat/sessionStore";
 import { scanWorkspace } from "./scanner/workspaceScanner";
 import { DiagnosticsPublisher } from "./report/diagnostics";
 import { exportReport } from "./report/markdownExport";
@@ -32,6 +34,7 @@ let diagnostics: DiagnosticsPublisher;
 let statusBar: vscode.StatusBarItem;
 let extensionUri: vscode.Uri;
 let indexStore: IndexStore;
+let sessionStore: SessionStore;
 let lastReport: AnalysisReport | undefined;
 let lastRoot: vscode.Uri | undefined;
 let activeRun: vscode.CancellationTokenSource | undefined;
@@ -42,6 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   extensionUri = context.extensionUri;
   indexStore = new IndexStore(context.globalStorageUri);
+  sessionStore = new SessionStore(context.globalStorageUri);
   auth = new AuthManager(context);
   sidebar = new SidebarView(context.extensionUri);
   diagnostics = new DiagnosticsPublisher(context);
@@ -52,12 +56,18 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(SidebarView.viewType, sidebar),
+    ChatPanel.registerOriginalProvider(),
     auth.onDidChange(() => void refreshAuthState()),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("ironbase")) void refreshAuthState();
     }),
     register("ironbase.analyze", () => startRun({ kind: "review" })),
     register("ironbase.scalabilityCheck", startScalabilityCheck),
+    register("ironbase.build", openBuildPanel),
+    register("ironbase.newBuild", () => withBuildPanel((panel) => panel.newSession())),
+    register("ironbase.switchBuild", () => withBuildPanel((panel) => panel.switchSession())),
+    register("ironbase.exportBuild", () => withBuildPanel((panel) => panel.exportSession())),
+    register("ironbase.revertRun", revertRun),
     register("ironbase.connectAccount", connectAccount),
     register("ironbase.signInAnthropic", signInAnthropic),
     register("ironbase.signInGoogle", signInGoogle),
@@ -78,6 +88,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   activeRun?.cancel();
+  ChatPanel.active?.stopRun();
 }
 
 function register(command: string, handler: () => Promise<void> | void): vscode.Disposable {
@@ -113,6 +124,52 @@ function describeModel(client: LlmClient): { label: string; automatic: boolean }
     label: known?.label ?? client.model,
     automatic: getConfig().model.length === 0,
   };
+}
+
+// --- Build panel -----------------------------------------------------------
+
+/**
+ * Opens the build panel, connecting an account first if there is none.
+ *
+ * The panel is usable without one — it just cannot run — but sending someone to
+ * an empty composer that rejects their first message is a worse introduction
+ * than asking up front.
+ */
+async function openBuildPanel(): Promise<void> {
+  if (!(await auth.getActiveClient())) {
+    const choice = await vscode.window.showWarningMessage(
+      "IronBase needs an AI account to build with.",
+      "Connect an account",
+    );
+    if (choice !== "Connect an account") return;
+    await connectAccount();
+    if (!(await auth.getActiveClient())) return;
+  }
+  ChatPanel.show({ extensionUri, auth, indexStore, sessionStore });
+}
+
+/**
+ * Runs an action against the build panel, opening it first if it is closed.
+ *
+ * Every one of these is reachable from the command palette, where "no panel is
+ * open" is a state the person is trying to leave rather than one worth being
+ * told about.
+ */
+async function withBuildPanel(action: (panel: ChatPanel) => Promise<void> | void): Promise<void> {
+  const panel = ChatPanel.active ?? ChatPanel.show({ extensionUri, auth, indexStore, sessionStore });
+  if (panel) await action(panel);
+}
+
+/** Puts every file the current build session wrote back to how it started. */
+async function revertRun(): Promise<void> {
+  const panel = ChatPanel.active;
+  if (!panel) {
+    void vscode.window.showInformationMessage(
+      "There is no build session to revert — the IronBase build panel is not open.",
+    );
+    return;
+  }
+  await panel.revertAll();
 }
 
 // --- Analysis runs ---------------------------------------------------------
@@ -312,13 +369,18 @@ async function startRun(mode: RunMode): Promise<void> {
   }
 }
 
+/** Stops whichever run is going — the review, or a build in the panel. */
 function cancelRun(): void {
-  if (!activeRun) {
-    void vscode.window.showInformationMessage("No IronBase review is running.");
+  if (activeRun) {
+    activeRun.cancel();
+    void vscode.window.showInformationMessage("Cancelling the review…");
     return;
   }
-  activeRun.cancel();
-  void vscode.window.showInformationMessage("Cancelling the review…");
+  if (ChatPanel.active) {
+    ChatPanel.active.stopRun();
+    return;
+  }
+  void vscode.window.showInformationMessage("Nothing is running.");
 }
 
 // --- Auth commands ---------------------------------------------------------

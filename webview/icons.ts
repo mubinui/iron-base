@@ -24,6 +24,8 @@ export type IconName =
   | "graph"
   | "wrench"
   | "download"
+  | "plus"
+  | "history"
   | "refresh"
   | "search"
   | "check"
@@ -198,6 +200,18 @@ const GLYPHS: Record<IconName, Glyph> = {
   download: {
     box: 24,
     strokes: ["M12 3.5 V15", "M7.5 10.5 L12 15 L16.5 10.5", "M4.5 19.5 H19.5"],
+  },
+  plus: {
+    box: 24,
+    strokes: ["M12 5 V19", "M5 12 H19"],
+  },
+  history: {
+    box: 24,
+    strokes: [
+      "M3.8 12 A8.2 8.2 0 1 0 6.4 6.1",
+      "M3.5 3.5 V7.5 H7.5",
+      "M12 7.5 V12 L15.2 13.9",
+    ],
   },
   refresh: {
     box: 24,

@@ -34,6 +34,7 @@ const configs = [
   extensionConfig,
   webviewConfig("webview/main.ts", "dist/webview.js"),
   webviewConfig("webview/sidebar.ts", "dist/sidebar.js"),
+  webviewConfig("webview/chat.ts", "dist/chat.js"),
 ];
 
 if (watch) {

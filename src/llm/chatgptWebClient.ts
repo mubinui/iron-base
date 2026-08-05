@@ -196,17 +196,17 @@ export class ChatGptWebClient implements LlmClient {
  * format produces prose that runs nothing.
  */
 function flattenTranscript(req: ChatRequest): string {
-  const sections: string[] = [req.system, renderToolInstructions(req.tools)];
+  const sections: string[] = [req.system, renderToolInstructions(req.tools, req.task)];
 
   for (const message of req.messages) {
-    sections.push(renderMessage(message));
+    sections.push(renderMessage(message, req));
   }
   return sections.filter((s) => s.trim().length > 0).join("\n\n---\n\n");
 }
 
-function renderMessage(message: NeutralMessage): string {
+function renderMessage(message: NeutralMessage, req: ChatRequest): string {
   if (message.role === "user") return message.text;
-  if (message.role === "toolResult") return renderToolResults(message.results);
+  if (message.role === "toolResult") return renderToolResults(message.results, req.task);
 
   const parts: string[] = [];
   if (message.text) parts.push(message.text);

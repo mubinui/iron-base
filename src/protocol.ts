@@ -1,4 +1,7 @@
+import type { DiffHunk } from "./engine/diff";
 import type { AnalysisReport, CodeFix, Finding } from "./engine/findings";
+import type { PermissionDecision, PermissionKind } from "./engine/permissions";
+import type { BuildPlan, Todo } from "./engine/plan";
 import type { ProviderId } from "./llm/types";
 
 /** Messages the extension host sends to a webview. */
@@ -24,6 +27,10 @@ export type HostMessage =
 export const ALLOWED_COMMANDS = [
   "ironbase.analyze",
   "ironbase.scalabilityCheck",
+  "ironbase.build",
+  "ironbase.newBuild",
+  "ironbase.switchBuild",
+  "ironbase.exportBuild",
   "ironbase.cancel",
   "ironbase.exportReport",
   "ironbase.showReport",
@@ -33,6 +40,7 @@ export const ALLOWED_COMMANDS = [
   "ironbase.signInGoogle",
   "ironbase.chooseModel",
   "ironbase.clearIndex",
+  "ironbase.revertRun",
   "ironbase.signOutProvider",
   "ironbase.signOut",
 ] as const;
@@ -84,3 +92,116 @@ export interface SidebarState {
     totalTokens?: number;
   };
 }
+
+// --- The build panel -------------------------------------------------------
+
+export type ChatMode = "architect" | "build";
+
+/**
+ * One entry in the thread.
+ *
+ * Everything the panel shows is one of these, which is what lets the webview
+ * rebuild the whole conversation from a replay when the panel is reopened
+ * without the host having to remember how any of it was rendered.
+ */
+export type ThreadItem =
+  | { kind: "user"; text: string }
+  | { kind: "assistant"; text: string }
+  | { kind: "tool"; name: string; summary: string }
+  | {
+      kind: "change";
+      id: string;
+      file: string;
+      change: "edit" | "create" | "delete";
+      added: number;
+      removed: number;
+      why?: string;
+      hunks: DiffHunk[];
+      reverted?: boolean;
+    }
+  | {
+      kind: "command";
+      id: string;
+      command: string;
+      why?: string;
+      output: string;
+      status?: string;
+      ok?: boolean;
+    }
+  | { kind: "notice"; level: "warning" | "error"; text: string }
+  | { kind: "plan"; plan: BuildPlan }
+  | { kind: "finished"; summary: string; followUps: string[] };
+
+/** The question on a permission card, and what it needs to show. */
+export interface PermissionCard {
+  id: string;
+  kind: PermissionKind;
+  subject: string;
+  why?: string;
+  hunks?: DiffHunk[];
+  added?: number;
+  removed?: number;
+}
+
+export interface ChatState {
+  workspaceName: string;
+  /** Names the build in the header and in the session picker. */
+  sessionTitle: string;
+  /** Empty when nothing is signed in — the panel says so instead of a composer. */
+  providerLabel?: string;
+  providerId?: ProviderId;
+  model?: string;
+  running: boolean;
+  agent: ChatMode;
+  /** What the panel is doing before the model is even involved. */
+  activity?: string;
+  iteration?: { current: number; max: number };
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    budget: number;
+    /**
+     * What this has cost so far, where the provider charges per token. Absent
+     * on a subscription or a local model, where the honest answer is "nothing
+     * extra" rather than a number.
+     */
+     costUsd?: number;
+    /** How full the model's context window is, 0–1. */
+    contextUsed?: number;
+  };
+  awaitingPlanApproval: boolean;
+  autoAcceptEdits: boolean;
+  /** How many files this session has written to, for the revert button. */
+  changedFiles: number;
+}
+
+export type ChatHostMessage =
+  | { type: "chatState"; state: ChatState }
+  | { type: "replay"; thread: ThreadItem[]; todos: Todo[] }
+  | { type: "append"; item: ThreadItem }
+  | { type: "assistantDelta"; delta: string }
+  | { type: "commandOutput"; id: string; chunk: string }
+  | { type: "commandEnd"; id: string; status: string; ok: boolean }
+  | { type: "todos"; todos: Todo[] }
+  | { type: "permission"; request: PermissionCard }
+  /** Takes the card off screen — answered, cancelled, or the run ended. */
+  | { type: "permissionClosed"; id: string; decision: PermissionDecision }
+  | { type: "changeReverted"; id: string };
+
+export type ChatWebviewMessage =
+  | { type: "ready" }
+  | { type: "send"; text: string; mode: ChatMode }
+  | { type: "stop" }
+  | { type: "approvePlan" }
+  | { type: "editPlan" }
+  | { type: "discardPlan" }
+  | { type: "permissionDecision"; id: string; decision: PermissionDecision }
+  | { type: "setAutoAccept"; on: boolean }
+  | { type: "openFile"; file: string; line?: number }
+  | { type: "showDiff"; id: string }
+  | { type: "revertChange"; id: string }
+  | { type: "revertAll" }
+  | { type: "newSession" }
+  | { type: "switchSession" }
+  | { type: "exportSession" }
+  | { type: "command"; command: AllowedCommand };

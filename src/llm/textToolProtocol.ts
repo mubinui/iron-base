@@ -30,7 +30,21 @@ const FENCE = "tool";
  */
 const BLOCK = /```+[ \t]*tool[ \t]*\r?\n([\s\S]*?)```+/gi;
 
-export function renderToolInstructions(tools: ToolDef[]): string {
+/**
+ * The tool whose call ends the run, and the word for what the run is.
+ *
+ * These differ by mode — a review ends at `emit_report`, a plan at
+ * `submit_plan`, a build at `finish` — and telling a model to keep going until
+ * it calls a tool it was never given is a reliable way to burn a whole run.
+ */
+export interface ProtocolTask {
+  finishTool: string;
+  noun: string;
+}
+
+const REVIEW_TASK: ProtocolTask = { finishTool: "emit_report", noun: "review" };
+
+export function renderToolInstructions(tools: ToolDef[], task: ProtocolTask = REVIEW_TASK): string {
   if (tools.length === 0) return "";
 
   const lines: string[] = [
@@ -49,8 +63,11 @@ export function renderToolInstructions(tools: ToolDef[]): string {
     "- Emit the block by itself. Do not explain that you are about to call a",
     "  tool, and do not wrap it in any other fence — a described call does not",
     "  run, and the turn is wasted.",
-    "- Results come back in the next message. Keep going until you have called",
-    "  `emit_report`, which ends the review.",
+    "- Every value is JSON, so a multi-line string needs its newlines escaped as",
+    "  `\\n`. Where a tool can take a small anchored edit instead of a whole file,",
+    "  prefer it — less to escape means less to get wrong.",
+    `- Results come back in the next message. Keep going until you have called`,
+    `  \`${task.finishTool}\`, which ends the ${task.noun}.`,
     "",
     "## Available tools",
     "",
@@ -119,7 +136,10 @@ export function parseToolCalls(reply: string, idPrefix: string): ParsedReply {
  * is reading prose, and "read_file returned" is followable where a call id is
  * not.
  */
-export function renderToolResults(results: ToolResult[]): string {
+export function renderToolResults(
+  results: ToolResult[],
+  task: ProtocolTask = REVIEW_TASK,
+): string {
   const lines: string[] = ["Tool results:", ""];
   for (const result of results) {
     lines.push(`## ${result.name}${result.isError ? " (error)" : ""}`);
@@ -127,7 +147,7 @@ export function renderToolResults(results: ToolResult[]): string {
     lines.push("");
   }
   lines.push(
-    "Continue. Emit the next tool block, or call `emit_report` if you have enough.",
+    `Continue. Emit the next tool block, or call \`${task.finishTool}\` if you have enough.`,
   );
   return lines.join("\n");
 }

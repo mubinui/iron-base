@@ -1,17 +1,32 @@
 # IronBase
 
-A VS Code extension that reviews your project's **architecture**, not just its syntax.
+A VS Code coding agent that starts by understanding your **architecture**.
 
-Most tools tell you a variable is unused. IronBase tells you that your sessions live in
-process memory so the app can never run on more than one server, and shows you the line
-where that happens. It is built for developers who can ship a working app but haven't yet
-had someone senior look over their shoulder.
+Most coding agents open your project cold and grep their way in. IronBase builds a local
+map of your codebase first — the dependency graph, what every file declares, where the
+risk concentrates — and the agent starts from that. It knows your sessions live in process
+memory before you ask it to fix them.
 
-What it does:
+It does two things:
+
+**Build.** Describe a change. An architect explores the code read-only and hands you a
+plan; you approve or edit it; then a builder works through it as a live task list —
+editing files, running your tests, checking its own work. Every edit is a diff you approve,
+and one click puts every file back.
+
+**Review.** A full architecture review: what will hurt as the project grows, each with a
+real file and line, plus a dependency map, one-click patches, and a modernization
+blueprint.
+
+What that gets you:
 
 - **Maps your architecture.** A dependency graph built from your imports, laid out by
   depth: what sits on top, what everything rests on, and which modules import each other
   in a ring. Click a module to see what depends on it and what was found inside it.
+- **Plans before it codes.** The architect cannot write to your files — the write tools
+  are not in its list, so this is a fact about the request, not a promise in a prompt.
+- **Verifies its own work.** The builder finds and runs your real test or build command,
+  reads the failure, and fixes it rather than reporting success over a red test.
 - **Finds the structural problems** that will hurt as the project grows, each with a real
   file and line, why it matters, and what to do about it.
 - **Writes the patch.** Where a fix is small enough to write out, you get a diff with an
@@ -26,6 +41,73 @@ What it does:
 
 Findings also land in the Problems panel, and the whole report exports to Markdown with
 the patches as fenced diffs.
+
+## Building something
+
+Click **Build something…** in the sidebar, or run `IronBase: Build…`.
+
+```
+you  ▸  move sessions out of process memory so this can run on two instances
+
+     ◆ ARCHITECT — read-only
+       search index   where are sessions stored
+       read           src/app.js
+       read           src/routes/auth.js
+
+     PLAN  Back sessions with Redis
+       1. src/session.js (new) — wrap ioredis behind get/set/destroy
+       2. src/app.js — replace the module-level `sessions` object
+       3. package.json — add ioredis
+       Risks: Redis becomes a dependency to run locally
+       Verify: npm test, then start two instances and share a login
+       [Build this]  [Edit plan]                          [Discard]
+```
+
+Approve it and the builder takes over: a task list appears, ticks over as it works, and
+each edit arrives as a diff with **Allow** / **Allow all edits** / **Reject**. Flip
+**Auto-accept edits** in the composer and it stops asking.
+
+**Plan first** is the default. **Build only** skips the architect for small, obvious
+changes.
+
+Builds are saved. Reload the window, come back tomorrow, and the conversation, the task
+list and the undo history are still there — `IronBase: Past Builds…` reopens any of the
+last 25 in this workspace, and `IronBase: Export Build as Markdown` writes one out as a
+diff you can paste into a pull request.
+
+### What can be undone
+
+Before IronBase writes to a file for the first time, it keeps a copy of what was there.
+That gives you **Undo** on any individual change and **Revert Changes from This Build**
+for all of them. Files it created are removed; files it changed go back byte for byte. If
+it cannot take that snapshot — an unreadable file, a permissions problem — it refuses the
+write rather than making a change it could not reverse.
+
+Deleting a file always asks, even with auto-accept on. "Allow all edits" is agreed to
+while looking at a diff, and nobody reading a diff was agreeing to have files removed.
+
+### It reads your project's own instructions
+
+If your repository has an `AGENTS.md`, a `CLAUDE.md`, a `.cursorrules` or a
+`.github/copilot-instructions.md`, IronBase reads it and follows it. You should not have
+to write your house style out again for every tool that turns up. They are re-read at the
+start of every task, so a rule you add after watching it get something wrong applies to
+the very next thing you ask.
+
+### Running commands
+
+The builder can run your project's own commands, because an agent that cannot run
+`npm test` is guessing about whether its edit works. Output streams into the panel and
+goes back to the model, so it can read a stack trace and fix what it broke.
+
+Every command asks first, and a short list is refused outright whatever you click:
+deletes aimed at `/` or your home directory, `sudo`, force pushes, `git reset --hard`,
+disk writes, `curl … | sh`, publishing a package.
+
+**This is a guard against accidents, not a sandbox.** A model set on doing harm could
+express any of those another way. What the list actually stops is the ordinary failure:
+a confident one-liner, a damage that is invisible in the text of it, and Allow being one
+keystroke away. Turn commands off entirely with `ironbase.permissions.command: "deny"`.
 
 ## No API keys. Ever.
 
@@ -86,10 +168,36 @@ without a code change:
 "ironbase.disabledProviders": ["chatgpt-oauth"]
 ```
 
+### Reaching things that are not files
+
+IronBase speaks MCP, so an issue tracker, a database schema or an internal docs server can
+be part of a build. Servers are configured in settings and their tools appear namespaced as
+`mcp__<server>__<tool>`, which is both how two servers can each have a `search` and how a
+third-party server is prevented from shipping a tool named `edit_file` that shadows the
+real one.
+
+```jsonc
+"ironbase.mcpServers": {
+  "github": {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-github"],
+    "env": { "GITHUB_TOKEN": "..." }
+  },
+  "docs": { "type": "http", "url": "https://internal.example.com/mcp" }
+}
+```
+
+Every MCP call asks before it runs, and is gated as a command rather than as an edit —
+these tools reach outside your workspace by design, which is exactly why "allow all edits"
+should not cover them. A server that will not start is logged and skipped; it never takes
+the build down with it.
+
 ## How it stays fast and cheap
 
 IronBase does **not** send your codebase to the model. It builds a local index first, and
-the model pulls in only what it asks for.
+the model pulls in only what it asks for. **Both modes start from that index** — the
+architect and the builder get the same brief the reviewer does, which is why neither of
+them opens with twenty minutes of grep.
 
 **1. Local index, built once.** A dependency-free scan extracts, per file, the symbols it
 declares, what it imports, and the architecture-relevant signals it carries — SQL built by
@@ -112,7 +220,19 @@ the exact matching lines. It opens a file only once the index says it matters.
 On a re-review the model is told which issues sit in untouched code (still open) and which
 sit in code you've since changed (check these first), so it spends its budget on what moved.
 
-**6. The dependency graph, computed locally.** Import statements are resolved to real
+**6. It delegates the expensive searching.** "Where do we validate input" is a question
+whose answer is a paragraph and whose cost is twenty file reads. Asked in the main
+conversation, those reads stay in the transcript and are re-sent on every turn afterwards.
+So the agent can hand that question to a read-only assistant with its own transcript, and
+get back only the paragraph — the searching is paid for once and then discarded.
+
+**7. It summarises itself before it runs out of room.** A long build eventually outgrows
+the model's context window. Rather than dying on a 400 halfway through, IronBase watches
+how full the window is and, at around two-thirds, has the model write a handover note of
+the earlier steps and continues from that. The panel shows the gauge and tells you when it
+happens.
+
+**8. The dependency graph, computed locally.** Import statements are resolved to real
 files, rolled up into modules, and checked for cycles and hub modules. That analysis costs
 no tokens, it drives the Architecture map, and a summary of it goes into the brief — so the
 model starts out knowing which modules are tangled, which is not something it could work
@@ -139,12 +259,18 @@ inside the normal undo stack.
 1. Install the extension and open your project folder.
 2. Click the IronBase icon in the activity bar.
 3. Connect an account.
-4. Click **Analyze architecture**, or **Scalability check…** and type your target.
+4. Click **Build something…** and describe a change — or **Analyze architecture** to see
+   what is there first.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
+| `IronBase: Build…` | Open the build panel: plan a change, approve it, watch it happen |
+| `IronBase: Revert Changes from This Build` | Put every file this build touched back |
+| `IronBase: New Build` | Start a fresh conversation, keeping the undo history |
+| `IronBase: Past Builds…` | Reopen an earlier build in this workspace |
+| `IronBase: Export Build as Markdown` | Write the build out as a diff and a summary |
 | `IronBase: Analyze Architecture` | Full architecture review |
 | `IronBase: Scalability Check…` | Review plus a capacity estimate for a target you name |
 | `IronBase: Connect Claude Account` | Sign in with Claude Pro/Max |
@@ -153,7 +279,7 @@ inside the normal undo stack.
 | `IronBase: Choose Model…` | Pick which connected account and model to review with |
 | `IronBase: Sign Out / Clear Credentials` | Delete every stored credential |
 | `IronBase: Rebuild Project Index` | Drop the cache and re-index from scratch |
-| `IronBase: Cancel Analysis` | Stop a running review |
+| `IronBase: Cancel Analysis` | Stop whatever is running — a review or a build |
 | `IronBase: Export Report as Markdown` | Save the report to a file |
 | `IronBase: Open Last Report` | Reopen the report panel |
 
@@ -167,7 +293,12 @@ inside the normal undo stack.
 | `ironbase.maxFiles` | `2000` | Cap on files indexed |
 | `ironbase.maxFileReadBytes` | `64000` | Cap on bytes per file read |
 | `ironbase.maxIterations` | `40` | Cap on review steps per run |
+| `ironbase.maxBuildIterations` | `80` | Cap on steps for one planning or build task |
 | `ironbase.maxSessionTokens` | `500000` | Token budget per run |
+| `ironbase.permissions.edit` | `ask` | Whether the builder may write files: `ask`, `allow`, `deny` |
+| `ironbase.permissions.command` | `ask` | Whether it may run commands: `ask`, `allow`, `deny` |
+| `ironbase.commandTimeoutMs` | `120000` | How long one command may run before it is stopped |
+| `ironbase.mcpServers` | `{}` | MCP servers to make available to the build agent |
 | `ironbase.enableDiagnostics` | `true` | Show findings in the Problems panel |
 | `ironbase.google.clientId` | *(empty)* | Google OAuth client ID for Gemini sign-in |
 | `ironbase.google.clientSecret` | *(empty)* | Google OAuth client secret for Gemini sign-in |
@@ -182,9 +313,9 @@ direction for your own load testing, not as a benchmark result.
 
 ## Privacy
 
-Your code goes to whichever account you connected, and only when you start a review. There
-is no IronBase server. The index lives on your machine. Only the parts of files the model
-asks to read are ever transmitted.
+Your code goes to whichever account you connected, and only when you start a review or a
+build. There is no IronBase server. The index lives on your machine. Only the parts of
+files the model asks to read are ever transmitted.
 
 ## Development
 

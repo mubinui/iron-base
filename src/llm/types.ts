@@ -325,6 +325,15 @@ export interface ChatRequest {
   tools: ToolDef[];
   maxTokens: number;
   model: string;
+  /**
+   * Which tool ends this run, and what to call the run.
+   *
+   * Only backends without native tool calling need it: they are told in prose to
+   * keep going until they call it, and naming a tool the request never offered
+   * sends the model looking for something that is not there. Providers with real
+   * tool calling ignore this.
+   */
+  task?: { finishTool: string; noun: string };
 }
 
 export interface CancelToken {

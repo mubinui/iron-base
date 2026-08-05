@@ -112,6 +112,51 @@ export async function updateIndex(
   return stats;
 }
 
+/**
+ * Re-reads one file into the index, or drops it if it is gone.
+ *
+ * The build agent edits files while it works, and everything it asks the index
+ * afterwards — `find_relevant`, the signal counts, the line numbers in an
+ * excerpt — was answered from what those files said when the session started.
+ * A full `updateIndex` after every write would re-stat the whole project; this
+ * is the same correctness for the cost of one read.
+ */
+export async function reindexFile(
+  index: WorkspaceIndex,
+  root: vscode.Uri,
+  relPath: string,
+  language: string,
+): Promise<void> {
+  const uri = vscode.Uri.joinPath(root, ...relPath.split("/"));
+  let stat: vscode.FileStat;
+  try {
+    stat = await vscode.workspace.fs.stat(uri);
+  } catch {
+    delete index.files[relPath];
+    return;
+  }
+
+  const bytes = await readFile(relPath, root);
+  if (!bytes) {
+    delete index.files[relPath];
+    return;
+  }
+  index.files[relPath] = buildRecord(
+    relPath,
+    language || index.files[relPath]?.language || languageFromPath(relPath),
+    stat.size,
+    stat.mtime,
+    bytes,
+    hashContent(bytes),
+  );
+}
+
+/** Last resort when a new file has no record to inherit a language from. */
+function languageFromPath(relPath: string): string {
+  const ext = relPath.includes(".") ? relPath.split(".").pop()?.toLowerCase() : undefined;
+  return ext ?? "text";
+}
+
 function buildRecord(
   path: string,
   language: string,

@@ -1,8 +1,8 @@
 {
   "name": "ironbase",
-  "displayName": "IronBase — Architecture Review",
-  "description": "AI architecture review with a dependency map, verified one-click code fixes, and a modernization blueprint. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
-  "version": "0.5.0",
+  "displayName": "IronBase — AI Coding Agent",
+  "description": "An AI coding agent that starts from your architecture. Plans a change, you approve it, then it writes the code and runs your tests — plus a full architecture review with a dependency map. Runs on the Claude, ChatGPT, or Gemini account you already have.",
+  "version": "0.6.0",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {
@@ -28,6 +28,9 @@
   ],
   "keywords": [
     "ironbase",
+    "coding agent",
+    "ai agent",
+    "pair programming",
     "architecture",
     "scalability",
     "code review",
@@ -54,6 +57,34 @@
         "title": "Scalability Check…",
         "category": "IronBase",
         "icon": "$(graph-line)"
+      },
+      {
+        "command": "ironbase.build",
+        "title": "Build…",
+        "category": "IronBase",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "ironbase.revertRun",
+        "title": "Revert Changes from This Build",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.newBuild",
+        "title": "New Build",
+        "category": "IronBase",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ironbase.switchBuild",
+        "title": "Past Builds…",
+        "category": "IronBase",
+        "icon": "$(history)"
+      },
+      {
+        "command": "ironbase.exportBuild",
+        "title": "Export Build as Markdown",
+        "category": "IronBase"
       },
       {
         "command": "ironbase.connectAccount",
@@ -213,10 +244,107 @@
           "default": 40,
           "description": "Maximum agent-loop iterations per analysis run."
         },
+        "ironbase.maxBuildIterations": {
+          "type": "number",
+          "default": 80,
+          "description": "Maximum agent-loop steps for one planning or build task. Coding needs more room than a review."
+        },
         "ironbase.maxSessionTokens": {
           "type": "number",
           "default": 500000,
           "description": "Token budget per analysis session (input + output)."
+        },
+        "ironbase.permissions.edit": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ],
+          "enumDescriptions": [
+            "Show the diff and wait for a click before writing (recommended)",
+            "Write without asking — the checkpoint still lets you revert",
+            "Never write; the agent can only describe changes"
+          ],
+          "default": "ask",
+          "markdownDescription": "What the build agent may do to your files. Architect mode is always `deny` regardless of this. Deleting a file always asks."
+        },
+        "ironbase.permissions.command": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "allow",
+            "deny"
+          ],
+          "enumDescriptions": [
+            "Show the command and wait for a click (recommended)",
+            "Run without asking",
+            "Never run commands"
+          ],
+          "default": "ask",
+          "markdownDescription": "Whether the agent may run shell commands such as `npm test`. A short list of irreversible commands is refused whatever this is set to."
+        },
+        "ironbase.mcpServers": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "MCP servers to make available to the build agent, keyed by the name their tools are namespaced under (`mcp__<name>__<tool>`). Every MCP call still asks before it runs.\n\n```jsonc\n\"ironbase.mcpServers\": {\n  \"github\": {\n    \"command\": \"npx\",\n    \"args\": [\"-y\", \"@modelcontextprotocol/server-github\"],\n    \"env\": { \"GITHUB_TOKEN\": \"...\" }\n  },\n  \"docs\": { \"type\": \"http\", \"url\": \"https://example.com/mcp\" }\n}\n```",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stdio",
+                  "http"
+                ],
+                "default": "stdio",
+                "description": "stdio spawns a local process; http posts to a URL."
+              },
+              "command": {
+                "type": "string",
+                "description": "Executable to run (stdio servers)."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Arguments passed to the command."
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra environment variables for the server process."
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory for the server process."
+              },
+              "url": {
+                "type": "string",
+                "description": "Endpoint to post to (http servers)."
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra headers, for authentication."
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true,
+                "description": "Set false to keep the entry but stop connecting to it."
+              }
+            }
+          }
+        },
+        "ironbase.commandTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "description": "How long one command may run before it is stopped, in milliseconds."
         },
         "ironbase.enableDiagnostics": {
           "type": "boolean",

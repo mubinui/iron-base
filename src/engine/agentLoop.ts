@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 import type { IronBaseConfig } from "../config";
 import {
   LlmCancelledError,
-  LlmHttpError,
   type LlmClient,
   type NeutralMessage,
   type ProviderId,
@@ -10,7 +9,6 @@ import {
 } from "../llm/types";
 import { PROVIDER_LABELS } from "../llm/types";
 import { log } from "../util/log";
-import { sleep } from "../util/limits";
 import type { ScanResult } from "../scanner/workspaceScanner";
 import { buildDigest } from "../memory/digest";
 import { buildModuleGraph } from "../memory/graph";
@@ -30,19 +28,12 @@ import {
   type ReportSubmission,
   type ToolOutcome,
 } from "./tools";
-import { compactForRequest, stripForeignBlocks } from "./transcript";
+import { MAX_PARALLEL_TOOLS, TurnRunner, mapWithConcurrency } from "./turnRunner";
 
 const MAX_TOKENS_PER_TURN = 16000;
-const MAX_RETRIES = 4;
-/**
- * How many of a turn's tool calls run at once.
- *
- * The work is file I/O on the extension host, so a handful in flight hides the
- * latency without starving the editor of its own thread.
- */
-const MAX_PARALLEL_TOOLS = 6;
-/** A cache read bills at roughly a tenth of a fresh input token. */
-const CACHED_TOKEN_WEIGHT = 0.1;
+
+/** Told to backends without native tool calling: what ends this run. */
+const REVIEW_TASK = { finishTool: TOOL_NAMES.emitReport, noun: "review" };
 
 /**
  * Tools that only read the workspace, so they are safe to run side by side.
@@ -57,8 +48,6 @@ const READ_ONLY_TOOLS = new Set<string>([
   TOOL_NAMES.readFile,
   TOOL_NAMES.search,
 ]);
-/** Gemini's free tier allows ~60 requests/minute; pace below that for all providers. */
-const MIN_REQUEST_INTERVAL_MS = 1200;
 
 export type ProgressEvent =
   | { type: "status"; text: string }
@@ -90,33 +79,24 @@ export interface RunOptions {
 export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> {
   const { scan, index, mode, config, token, onProgress } = options;
 
-  const first = await options.getClient();
-  if (!first) throw new Error("No AI provider is connected.");
-  let client: LlmClient = first;
-
-  /**
-   * Moves the run onto another connected account when this one is rate limited.
-   *
-   * A subscription tier that has hit its cap will still be capped in thirty
-   * seconds, so backing off and trying the same account again mostly burns the
-   * review's remaining time. Anyone with a second account signed in has somewhere
-   * to go, and the transcript is provider-neutral apart from the `raw` blocks
-   * that get stripped on the way out.
-   */
-  const switchProvider = async (): Promise<boolean> => {
-    if (!config.autoFailover || !options.getFallback) return false;
-    const alternative = await options.getFallback(client.id);
-    if (!alternative || alternative.id === client.id) return false;
-    onProgress({
-      type: "warning",
-      text: `${PROVIDER_LABELS[client.id]} is rate limited — continuing on ${PROVIDER_LABELS[alternative.id]}.`,
-    });
-    log.warn(
-      `Failing over from ${PROVIDER_LABELS[client.id]} to ${PROVIDER_LABELS[alternative.id]}.`,
-    );
-    client = alternative;
-    return true;
-  };
+  const turns = await TurnRunner.create({
+    getClient: options.getClient,
+    getFallback: options.getFallback,
+    autoFailover: config.autoFailover,
+    token,
+    onEvent: (event) => {
+      if (event.type === "usage") {
+        onProgress({
+          type: "usage",
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+          budget: config.maxSessionTokens,
+        });
+      } else {
+        onProgress(event);
+      }
+    },
+  });
 
   const digest = buildDigest(index, scan);
   const system = buildSystemPrompt(mode, digest);
@@ -135,15 +115,9 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
   const findings: Finding[] = [];
   const fixes: CodeFix[] = [];
   let report: ReportSubmission | undefined;
-  let tokensUsed = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  /** What the budget is charged: real tokens, with cache reads at their true cost. */
-  let billedTokens = 0;
   let iteration = 0;
   let warnedAboutBudget = false;
   let incompleteReason: string | undefined;
-  let lastRequestAt = 0;
 
   while (iteration < config.maxIterations) {
     if (token.isCancellationRequested) {
@@ -153,77 +127,9 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     iteration++;
     onProgress({ type: "iteration", current: iteration, max: config.maxIterations });
 
-    // Re-resolved every step rather than captured once, so changing provider or
-    // model in the sidebar takes effect on the review already running. A failed
-    // resolve keeps the previous client rather than killing the run.
-    client = (await options.getClient()) ?? client;
-
-    const sinceLast = Date.now() - lastRequestAt;
-    if (sinceLast < MIN_REQUEST_INTERVAL_MS) {
-      await sleep(MIN_REQUEST_INTERVAL_MS - sinceLast);
-    }
-    lastRequestAt = Date.now();
-
     let turn;
     try {
-      turn = await callWithRetry(
-        () => {
-          // Rebuilt per attempt rather than once per turn, because a retry may
-          // be going to a different provider than the one this request was
-          // first shaped for, and `raw` blocks are only valid for their author.
-          //
-          // The whole transcript is re-sent every turn, so step 1 is paid for
-          // again on step 40. Old file contents are the bulk of that and stop
-          // being useful the moment a finding is written about them, so they
-          // travel as a one-line note. The full history is kept locally — only
-          // the copy going over the wire shrinks.
-          const wire = compactForRequest(stripForeignBlocks(messages, client.id));
-          if (wire.stats.resultsPruned > 0) {
-            log.info(
-              `Compacted ${wire.stats.resultsPruned} old tool result(s), ` +
-                `~${Math.round(wire.stats.charsSaved / 4).toLocaleString()} tokens saved this turn.`,
-            );
-          }
-          return client.chat(
-            {
-              system,
-              messages: wire.messages,
-              tools,
-              maxTokens: MAX_TOKENS_PER_TURN,
-              model: client.model,
-            },
-            (event) => {
-              if (event.type === "text") {
-                onProgress({ type: "text", delta: event.delta });
-              } else if (event.type === "toolCallStart") {
-                onProgress({ type: "tool", name: event.name });
-              } else if (event.type === "usage") {
-                inputTokens += event.inputTokens;
-                outputTokens += event.outputTokens;
-                const cached = event.cachedInputTokens ?? 0;
-                // The budget exists to stop a runaway *spend*, and a cached
-                // token bills at about a tenth of a fresh one. Charging both the
-                // same made a well-cached run — which is every run, since the
-                // brief is byte-stable — look like it was burning through its
-                // budget when it was replaying the cheapest tokens available.
-                billedTokens +=
-                  event.inputTokens - cached + cached * CACHED_TOKEN_WEIGHT + event.outputTokens;
-                tokensUsed = billedTokens;
-                onProgress({
-                  type: "usage",
-                  inputTokens,
-                  outputTokens,
-                  budget: config.maxSessionTokens,
-                });
-              }
-            },
-            token,
-          );
-        },
-        token,
-        onProgress,
-        switchProvider,
-      );
+      turn = await turns.take(system, messages, tools, MAX_TOKENS_PER_TURN, REVIEW_TASK);
     } catch (err) {
       if (err instanceof LlmCancelledError || token.isCancellationRequested) {
         incompleteReason = "Cancelled before the review finished.";
@@ -233,9 +139,7 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     }
 
     if (turn.stopReason === "refusal") {
-      throw new Error(
-        `The model declined this request${turn.detail ? `: ${turn.detail}` : "."}`,
-      );
+      throw new Error(`The model declined this request${turn.detail ? `: ${turn.detail}` : "."}`);
     }
     if (turn.stopReason === "error") {
       throw new Error(turn.detail ?? "The model returned a streaming error.");
@@ -249,7 +153,7 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
       // Stamped so these blocks can be stripped if a later turn goes to a
       // different provider — Anthropic's signed thinking blocks and Codex's
       // encrypted reasoning are a hard 400 anywhere else.
-      producedBy: client.id,
+      producedBy: turns.client.id,
     });
 
     if (turn.toolCalls.length === 0) {
@@ -309,7 +213,7 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
 
     if (report) break;
 
-    const budgetSpent = tokensUsed / config.maxSessionTokens;
+    const budgetSpent = turns.usage.billedTokens / config.maxSessionTokens;
     if (budgetSpent >= 1) {
       incompleteReason = "Token budget for this run was exhausted.";
       // A turn large enough to jump the whole 80–100% band would otherwise stop
@@ -321,7 +225,7 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
         });
       }
       messages.push({ role: "user", text: FORCE_REPORT });
-      report = await finalTurn(options, system, messages, tools, runner, findings, fixes, onProgress);
+      report = await finalTurn(turns, system, messages, tools, runner, findings, fixes, token);
       break;
     }
     if (budgetSpent >= 0.8 && !warnedAboutBudget) {
@@ -336,7 +240,7 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     if (!token.isCancellationRequested) {
       onProgress({ type: "status", text: "Step limit reached — asking for the report." });
       messages.push({ role: "user", text: FORCE_REPORT });
-      report = await finalTurn(options, system, messages, tools, runner, findings, fixes, onProgress);
+      report = await finalTurn(turns, system, messages, tools, runner, findings, fixes, token);
     }
   }
 
@@ -357,35 +261,26 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     scalability: report?.scalability,
     incompleteReason,
     workspaceName: scan.rootName,
-    provider: PROVIDER_LABELS[client.id],
-    model: client.model,
+    provider: PROVIDER_LABELS[turns.client.id],
+    model: turns.client.model,
     generatedAt: new Date().toISOString(),
   };
 }
 
 /** One last turn that only accepts emit_report, used when a cap forced the stop. */
 async function finalTurn(
-  options: RunOptions,
+  turns: TurnRunner,
   system: string,
   messages: NeutralMessage[],
   tools: ReturnType<typeof toolDefinitions>,
   runner: ToolRunner,
   findings: Finding[],
   fixes: CodeFix[],
-  onProgress: (event: ProgressEvent) => void,
+  token: vscode.CancellationToken,
 ): Promise<ReportSubmission | undefined> {
-  const { token } = options;
   if (token.isCancellationRequested) return undefined;
-  const client = await options.getClient();
-  if (!client) return undefined;
   try {
-    const turn = await client.chat(
-      { system, messages, tools, maxTokens: MAX_TOKENS_PER_TURN, model: client.model },
-      (event) => {
-        if (event.type === "text") onProgress({ type: "text", delta: event.delta });
-      },
-      token,
-    );
+    const turn = await turns.take(system, messages, tools, MAX_TOKENS_PER_TURN, REVIEW_TASK);
     for (const call of turn.toolCalls) {
       const outcome = await runner.run(call.name, call.input);
       if (outcome.finding) findings.push(outcome.finding);
@@ -398,31 +293,6 @@ async function finalTurn(
   return undefined;
 }
 
-/**
- * Runs `worker` over every item with at most `limit` in flight, returning the
- * results in input order.
- *
- * Workers pull from a shared cursor rather than being sliced into fixed batches,
- * so one slow file read cannot hold up the whole group behind it.
- */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  worker: (item: T) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (;;) {
-      const index = next++;
-      if (index >= items.length) return;
-      results[index] = await worker(items[index]);
-    }
-  });
-  await Promise.all(runners);
-  return results;
-}
-
 function gradeFromFindings(findings: Finding[]): AnalysisReport["grade"] {
   const critical = findings.filter((f) => f.severity === "critical").length;
   const high = findings.filter((f) => f.severity === "high").length;
@@ -431,45 +301,4 @@ function gradeFromFindings(findings: Finding[]): AnalysisReport["grade"] {
   if (high >= 3) return "D";
   if (high >= 1) return "C";
   return "B";
-}
-
-/** Retries 429s and 5xx with backoff; everything else surfaces immediately. */
-async function callWithRetry<T>(
-  operation: () => Promise<T>,
-  token: vscode.CancellationToken,
-  onProgress: (event: ProgressEvent) => void,
-  switchProvider?: () => Promise<boolean>,
-): Promise<T> {
-  let attempt = 0;
-  while (true) {
-    try {
-      return await operation();
-    } catch (err) {
-      if (token.isCancellationRequested) throw new LlmCancelledError();
-      const retryable =
-        err instanceof LlmHttpError && (err.status === 429 || err.status >= 500);
-      if (!retryable || attempt >= MAX_RETRIES) throw err;
-
-      attempt++;
-      const httpErr = err as LlmHttpError;
-
-      // A rate limit is the one failure another account can answer immediately,
-      // so try that before sleeping. Waiting out a subscription cap can cost
-      // minutes of a review that has a step budget to spend.
-      if (httpErr.status === 429 && switchProvider && (await switchProvider())) {
-        continue;
-      }
-
-      const waitMs = httpErr.retryAfterSeconds
-        ? httpErr.retryAfterSeconds * 1000
-        : Math.min(30_000, 1000 * 2 ** attempt);
-      const reason = httpErr.status === 429 ? "Rate limited" : "Service error";
-      onProgress({
-        type: "warning",
-        text: `${reason} — retrying in ${Math.round(waitMs / 1000)}s (attempt ${attempt}/${MAX_RETRIES}).`,
-      });
-      log.warn(`${reason} (HTTP ${httpErr.status}); waiting ${waitMs}ms.`);
-      await sleep(waitMs);
-    }
-  }
 }

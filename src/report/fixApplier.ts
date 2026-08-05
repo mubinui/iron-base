@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import type { CodeFix } from "../engine/findings";
 import { locateAnchor } from "../engine/tools";
 import { log } from "../util/log";
+import { resolveInside } from "../util/paths";
 
 export type ApplyResult =
   | { ok: true; file: string; line: number }
@@ -25,7 +26,7 @@ export async function applyFix(
   root: vscode.Uri,
   fix: CodeFix,
 ): Promise<ApplyResult> {
-  const uri = resolveInside(root, fix.file);
+  const uri = resolveFile(root, fix.file);
   if (!uri) return { ok: false, reason: `${fix.file} is outside the workspace.` };
 
   if (fix.kind === "create") {
@@ -109,7 +110,7 @@ async function createFile(uri: vscode.Uri, fix: CodeFix): Promise<ApplyResult> {
  * nothing is written until Apply.
  */
 export async function previewFix(root: vscode.Uri, fix: CodeFix): Promise<string | undefined> {
-  const uri = resolveInside(root, fix.file);
+  const uri = resolveFile(root, fix.file);
   if (!uri) return `${fix.file} is outside the workspace.`;
 
   let original = "";
@@ -181,13 +182,13 @@ async function reveal(uri: vscode.Uri, line: number): Promise<void> {
   editor.revealRange(new vscode.Range(target, target), vscode.TextEditorRevealType.InCenter);
 }
 
-/** Rejects traversal and absolute paths before anything touches the disk. */
-function resolveInside(root: vscode.Uri, relPath: string): vscode.Uri | undefined {
-  const cleaned = relPath.trim().replace(/^\.?\//, "");
-  if (cleaned.length === 0) return undefined;
-  if (/^([a-zA-Z]:|~)/.test(cleaned) || relPath.startsWith("/")) return undefined;
-  const segments = cleaned.split(/[\\/]+/).filter((s) => s.length > 0);
-  if (segments.some((s) => s === "..")) return undefined;
-  const uri = vscode.Uri.joinPath(root, ...segments);
-  return uri.path.startsWith(root.path) ? uri : undefined;
+/**
+ * The shared workspace guard, plus one refusal it does not make on its own: a
+ * patch has to name a file, and the guard maps an empty path to the root
+ * directory because `list_dir` needs that. Applying a patch to a directory is
+ * not a thing, so it stops here rather than failing further in.
+ */
+function resolveFile(root: vscode.Uri, relPath: string): vscode.Uri | undefined {
+  const uri = resolveInside(root, relPath);
+  return uri && uri.path !== root.path ? uri : undefined;
 }

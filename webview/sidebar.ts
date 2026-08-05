@@ -165,8 +165,20 @@ function connected(state: SidebarState): HTMLElement[] {
   if (state.running) return running(state);
 
   const out: HTMLElement[] = [];
+  // Build leads: reviewing tells you what is wrong, building is what fixes it,
+  // and the panel it opens is where someone spends their time.
+  out.push(el("h2", "Build"));
+  out.push(actionButton("Build something…", "wrench", "ironbase.build"));
+  out.push(
+    el(
+      "p",
+      "Describe a change. IronBase plans it against the project map, you approve the plan, then it writes the code and runs your tests.",
+      "muted",
+    ),
+  );
+
   out.push(el("h2", "Review"));
-  out.push(actionButton("Analyze architecture", "play", "ironbase.analyze"));
+  out.push(actionButton("Analyze architecture", "play", "ironbase.analyze", "ghost"));
   out.push(actionButton("Scalability check…", "gauge", "ironbase.scalabilityCheck", "ghost"));
 
   if (state.lastSummary) {
