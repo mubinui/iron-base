@@ -69,6 +69,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("ironbase.exportBuild", () => withBuildPanel((panel) => panel.exportSession())),
     register("ironbase.revertRun", revertRun),
     register("ironbase.connectAccount", connectAccount),
+    register("ironbase.useConnectedAccount", useConnectedAccount),
     register("ironbase.signInAnthropic", signInAnthropic),
     register("ironbase.signInGoogle", signInGoogle),
     register("ironbase.signInOpenAi", signInOpenAi),
@@ -104,17 +105,54 @@ function register(command: string, handler: () => Promise<void> | void): vscode.
 async function refreshAuthState(): Promise<void> {
   const client = await auth.getActiveClient();
   const label = client ? PROVIDER_LABELS[client.id] : undefined;
+  const connected = await auth.availableProviders();
+
+  // Settings can point at an account whose credential is not there — a key that
+  // was signed out, or a provider picked from the model list and never
+  // connected. `getActiveClient` honours the pin and returns nothing, which is
+  // correct but indistinguishable from "signed out" unless we say so here.
+  const pinned = getConfig().provider;
+  const pinnedMissing =
+    !client && pinned !== "auto" && connected.length > 0 ? pinned : undefined;
+
   sidebar.setState({
     providerLabel: label,
     providerId: client?.id,
-    connected: await auth.availableProviders(),
+    connected,
+    pinnedMissing,
     model: client ? describeModel(client) : undefined,
   });
-  statusBar.text = `$(pulse) IronBase: ${label ?? "sign in"}`;
-  statusBar.tooltip = client
-    ? `IronBase is using ${label} (${client.model})`
-    : "IronBase — click to connect an AI account";
+
+  statusBar.text = pinnedMissing
+    ? `$(warning) IronBase: ${PROVIDER_LABELS[pinnedMissing]} not connected`
+    : `$(pulse) IronBase: ${label ?? "sign in"}`;
+  statusBar.tooltip = pinnedMissing
+    ? `Settings point at ${PROVIDER_LABELS[pinnedMissing]}, which has no stored credential. Click to fix.`
+    : client
+      ? `IronBase is using ${label} (${client.model})`
+      : "IronBase — click to connect an AI account";
   statusBar.show();
+}
+
+/**
+ * Unsticks a pin left on an account that is not connected.
+ *
+ * Clearing it back to `auto` is the right repair rather than guessing a
+ * provider: `auto` picks the first connected account in a defined order, which
+ * is what someone with exactly one account signed in means anyway.
+ */
+async function useConnectedAccount(): Promise<void> {
+  const settings = vscode.workspace.getConfiguration("ironbase");
+  await settings.update("provider", "auto", vscode.ConfigurationTarget.Global);
+  await settings.update("model", "", vscode.ConfigurationTarget.Global);
+  await refreshAuthState();
+
+  const client = await auth.getActiveClient();
+  void vscode.window.showInformationMessage(
+    client
+      ? `IronBase is now using ${PROVIDER_LABELS[client.id]}.`
+      : "No account is connected yet — connect one to get started.",
+  );
 }
 
 /** Names the resolved model the way the picker lists it, so the two agree. */
@@ -564,11 +602,16 @@ async function connectOllama(): Promise<void> {
 }
 
 /**
- * Points the next review at the provider just connected.
+ * Points the next run at the account just connected.
  *
- * Without this, connecting a second account appears to do nothing: `auto`
- * resolves in a fixed order, so a newly added provider lower down that order is
- * ignored until the one above it is signed out.
+ * Without this, connecting an account appears to do nothing. `auto` resolves in
+ * a fixed order, so a newly added provider lower down that order is ignored
+ * until the one above it is signed out — and worse, a pin left on an account
+ * whose credential is gone makes a *successful* sign-in look like a failed one,
+ * because the sidebar has no client to show and falls back to the sign-in page.
+ *
+ * Every way of connecting has to do this. The three OAuth flows did not, which
+ * is exactly how that second case turned up in the wild.
  */
 async function pinProvider(id: ProviderId): Promise<void> {
   const settings = vscode.workspace.getConfiguration("ironbase");
@@ -587,6 +630,7 @@ async function signInAnthropic(): Promise<void> {
   }
   const done = await auth.anthropic.signIn();
   if (done) {
+    await pinProvider("anthropic-oauth");
     await refreshAuthState();
     void vscode.window.showInformationMessage("IronBase is connected to your Claude account.");
   }
@@ -625,6 +669,7 @@ async function signInGoogle(): Promise<void> {
 
   const done = await auth.google.signIn();
   if (done) {
+    await pinProvider("gemini-oauth");
     await refreshAuthState();
     void vscode.window.showInformationMessage("IronBase is connected to your Google account.");
   }
@@ -639,6 +684,7 @@ async function signInOpenAi(): Promise<void> {
   }
   const done = await auth.openai.signIn();
   if (done) {
+    await pinProvider("chatgpt-oauth");
     await refreshAuthState();
     void vscode.window.showInformationMessage("IronBase is connected to your ChatGPT account.");
   }

@@ -95,8 +95,51 @@ function describeTool(name: string): string {
 }
 
 function render(state: SidebarState): void {
-  root.replaceChildren(...(state.providerLabel ? connected(state) : signedOut()));
+  // A pin left on an account that is not connected is its own state, and it has
+  // to be said out loud. Falling through to the sign-in page here told someone
+  // who had *just* signed in successfully to go and sign in — with no way to
+  // discover that a setting, not the sign-in, was the problem.
+  const page = state.pinnedMissing
+    ? pinBroken(state, state.pinnedMissing)
+    : state.providerLabel
+      ? connected(state)
+      : signedOut();
+  root.replaceChildren(...page);
   if (state.running) startTimer(state.startedAt);
+}
+
+function pinBroken(state: SidebarState, missing: ProviderId): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  const label = PROVIDER_LABELS[missing];
+  const others = (state.connected ?? []).filter((id) => id !== missing);
+
+  const warn = el("div", undefined, "warn");
+  warn.append(
+    icon("alert", 13),
+    el("span", `Settings point at ${label}, which has no stored credential.`),
+  );
+  out.push(warn);
+
+  out.push(
+    el(
+      "p",
+      others.length > 0
+        ? `You are signed in to ${others.map((id) => PROVIDER_LABELS[id]).join(" and ")}. Switch to it and IronBase will work straight away.`
+        : `Connect ${label}, or switch to another account.`,
+      "muted",
+    ),
+  );
+
+  out.push(actionButton("Use my connected account", "switchAccount", "ironbase.useConnectedAccount"));
+  out.push(linkButton("Choose a different model", "switchAccount", "ironbase.chooseModel"));
+  out.push(linkButton("Connect another account", "signIn", CONNECT));
+
+  out.push(el("h2", "Connected"));
+  for (const account of ACCOUNTS) {
+    if (!others.includes(account.id)) continue;
+    out.push(accountCard(account, true, false));
+  }
+  return out;
 }
 
 // --- Signed out ------------------------------------------------------------

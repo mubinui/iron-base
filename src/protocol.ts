@@ -35,6 +35,7 @@ export const ALLOWED_COMMANDS = [
   "ironbase.exportReport",
   "ironbase.showReport",
   "ironbase.connectAccount",
+  "ironbase.useConnectedAccount",
   "ironbase.signInAnthropic",
   "ironbase.signInOpenAi",
   "ironbase.signInGoogle",
@@ -69,6 +70,15 @@ export interface SidebarState {
   providerId?: ProviderId;
   /** Every account with stored credentials, so the user can switch. */
   connected?: ProviderId[];
+  /**
+   * Set when settings pin an account that has no stored credential, while other
+   * accounts *are* connected.
+   *
+   * Without this the sidebar cannot tell that case apart from "nothing is
+   * signed in", so it shows the sign-in page to someone who has just signed in
+   * successfully — which reads as the sign-in having failed.
+   */
+  pinnedMissing?: ProviderId;
   /**
    * The model the next run will use. `automatic` means nothing is pinned in
    * settings, so `label` is only what the account resolved to this time.
