@@ -1442,6 +1442,47 @@ body {
 .segmented button:hover { background: var(--surface-raised); color: var(--ink); }
 .segmented button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .segmented button.on:hover { background: var(--accent-soft); }
+/* The model picker: a control, and it has to look like one. A label nobody can
+   click is not somewhere people look for a setting. */
+.model-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 14rem;
+  padding: 0.26rem 0.5rem;
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  color: var(--ink);
+  background: var(--surface);
+}
+.model-pick:hover:not(:disabled) { background: var(--surface-raised); border-color: var(--accent); }
+.model-pick span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.model-pick .caret, .meter.model .caret { opacity: 0.5; flex: 0 0 auto; }
+button.meter.model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.12rem 0.35rem;
+  border-radius: var(--radius-sm);
+  border-color: transparent;
+  max-width: 13rem;
+}
+button.meter.model:hover { background: var(--surface-raised); color: var(--ink); }
+button.meter.model span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
 .toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 11.5px; color: var(--ink-muted); cursor: pointer; }
 .toggle input { accent-color: var(--accent); }
 .hint { font-size: 10.5px; color: var(--ink-muted); }

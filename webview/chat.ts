@@ -23,7 +23,7 @@ import type {
   ThreadItem,
 } from "../src/protocol";
 import { formatCost } from "../src/llm/modelLimits";
-import { icon, type IconName } from "./icons";
+import { icon, PROVIDER_ICONS, type IconName } from "./icons";
 import { renderMarkdown } from "./markdown";
 
 declare function acquireVsCodeApi(): { postMessage(message: ChatWebviewMessage): void };
@@ -256,8 +256,12 @@ function renderHead(): void {
     }
   }
   if (state.model) {
-    const model = el("span", state.model, "meter model");
-    model.title = state.providerLabel ? `${state.providerLabel} · ${state.model}` : state.model;
+    const model = el("button", undefined, "meter model");
+    model.append(el("span", state.model), icon("chevron", 10, "caret"));
+    model.title = `${state.providerLabel ? `${state.providerLabel} · ` : ""}${state.model}\nClick to change account or model`;
+    model.addEventListener("click", () =>
+      vscode.postMessage({ type: "command", command: "ironbase.chooseModel" }),
+    );
     head.append(model);
   }
 
@@ -574,6 +578,25 @@ function renderComposer(): void {
   segmented.append(planButton, buildButton);
   row.append(segmented);
 
+  // The model picker sits with the mode selector, because "which model" and
+  // "plan or build" are the same decision made at the same moment — and a
+  // header label you cannot click is not somewhere anyone looks for a setting.
+  const model = document.createElement("button");
+  model.className = "model-pick";
+  model.append(
+    icon(state.providerId ? (PROVIDER_ICONS[state.providerId] as IconName) : "key", 12),
+    el("span", state.model || "Choose a model"),
+    icon("chevron", 10, "caret"),
+  );
+  model.title = "Change the account or model this build runs on";
+  // Switching mid-turn takes effect on the next step anyway, but offering it
+  // while a request is in flight invites a click that looks ignored.
+  model.disabled = state.running;
+  model.addEventListener("click", () =>
+    vscode.postMessage({ type: "command", command: "ironbase.chooseModel" }),
+  );
+  row.append(model);
+
   const toggle = el("label", undefined, "toggle");
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
@@ -607,7 +630,7 @@ function renderComposer(): void {
 
 /** What the composer draws, so a redraw can be skipped when none of it moved. */
 function composerSignature(): string {
-  return [state.running, state.providerLabel ?? "", state.autoAcceptEdits, mode].join("|");
+  return [state.running, state.providerLabel ?? "", state.model ?? "", state.autoAcceptEdits, mode].join("|");
 }
 
 /**
