@@ -1,0 +1,6 @@
+[
+  { "id": 1, "name": "Desk lamp", "price": 24.99, "stock": 12 },
+  { "id": 2, "name": "Mechanical keyboard", "price": 89.0, "stock": 4 },
+  { "id": 3, "name": "Monitor stand", "price": 42.5, "stock": 0 },
+  { "id": 4, "name": "USB-C hub", "price": 34.95, "stock": 27 }
+]

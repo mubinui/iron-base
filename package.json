@@ -1,0 +1,223 @@
+{
+  "name": "ironbase",
+  "displayName": "IronBase — Architecture Review",
+  "description": "AI-powered architecture review and scalability analysis. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
+  "version": "0.1.0",
+  "publisher": "ironbase",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mubinui/iron-base.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mubinui/iron-base/issues"
+  },
+  "homepage": "https://github.com/mubinui/iron-base#readme",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#16191d",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "ironbase",
+    "architecture",
+    "scalability",
+    "code review",
+    "ai",
+    "claude",
+    "gemini"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ironbase.analyze",
+        "title": "Analyze Architecture",
+        "category": "IronBase",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "ironbase.scalabilityCheck",
+        "title": "Scalability Check…",
+        "category": "IronBase",
+        "icon": "$(graph-line)"
+      },
+      {
+        "command": "ironbase.signInAnthropic",
+        "title": "Connect Claude Account",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.signInOpenAi",
+        "title": "Connect ChatGPT Account",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.signInGoogle",
+        "title": "Connect Gemini Account",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.clearIndex",
+        "title": "Rebuild Project Index",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.signOut",
+        "title": "Sign Out / Clear Credentials",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.cancel",
+        "title": "Cancel Analysis",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.exportReport",
+        "title": "Export Report as Markdown",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.showReport",
+        "title": "Open Last Report",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.dev.dumpRepoMap",
+        "title": "Developer: Dump Architectural Brief",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.dev.ping",
+        "title": "Developer: Ping Model",
+        "category": "IronBase"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ironbase",
+          "title": "IronBase",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ironbase": [
+        {
+          "type": "webview",
+          "id": "ironbase.sidebar",
+          "name": "IronBase"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "IronBase",
+      "properties": {
+        "ironbase.provider": {
+          "type": "string",
+          "enum": ["auto", "anthropic-oauth", "chatgpt-oauth", "gemini-oauth"],
+          "enumDescriptions": [
+            "Use the first connected account",
+            "Claude (Pro or Max subscription)",
+            "ChatGPT (Plus or Pro subscription)",
+            "Gemini (Google account, free tier included)"
+          ],
+          "default": "auto",
+          "description": "Which connected account to review with."
+        },
+        "ironbase.model": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Model override. Empty uses the account default (Claude: `claude-opus-5`, ChatGPT: `gpt-5-codex`, Gemini: `gemini-2.5-pro`)."
+        },
+        "ironbase.ignoreGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.git/**",
+            "**/*.min.js",
+            "**/vendor/**",
+            "**/coverage/**"
+          ],
+          "description": "Glob patterns to exclude from analysis (in addition to .gitignore)."
+        },
+        "ironbase.maxFiles": {
+          "type": "number",
+          "default": 2000,
+          "description": "Maximum number of files the scanner will index."
+        },
+        "ironbase.maxFileReadBytes": {
+          "type": "number",
+          "default": 64000,
+          "description": "Maximum bytes returned per read_file tool call."
+        },
+        "ironbase.maxIterations": {
+          "type": "number",
+          "default": 40,
+          "description": "Maximum agent-loop iterations per analysis run."
+        },
+        "ironbase.maxSessionTokens": {
+          "type": "number",
+          "default": 500000,
+          "description": "Token budget per analysis session (input + output)."
+        },
+        "ironbase.enableDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show findings as squiggles in the Problems panel."
+        },
+        "ironbase.google.clientId": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Google OAuth **client ID** for Gemini sign-in. Create a free *Desktop app* client at [Google Cloud Console](https://console.cloud.google.com/apis/credentials) — see the README. Claude and ChatGPT need no setup."
+        },
+        "ironbase.google.clientSecret": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Google OAuth **client secret** that pairs with the client ID above. Required by Google's token endpoint for Desktop app clients."
+        },
+        "ironbase.disabledProviders": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["anthropic-oauth", "chatgpt-oauth", "gemini-oauth"]
+          },
+          "default": [],
+          "description": "Accounts to hide (kill-switch, e.g. if a sign-in flow breaks upstream)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
+    "vscode:prepublish": "npm run build -- --production",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "ignore": "^5.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.24.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0"
+  }
+}
