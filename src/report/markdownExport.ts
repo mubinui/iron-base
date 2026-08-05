@@ -2,10 +2,13 @@ import * as vscode from "vscode";
 import {
   CATEGORY_LABELS,
   countBySeverity,
+  fixesFor,
   SEVERITY_ORDER,
   type AnalysisReport,
+  type CodeFix,
   type Finding,
 } from "../engine/findings";
+import { formatRing } from "../memory/graph";
 
 export function renderMarkdown(report: AnalysisReport): string {
   const out: string[] = [];
@@ -28,6 +31,63 @@ export function renderMarkdown(report: AnalysisReport): string {
         present.map((s) => `${counts[s]} ${s}`).join(", "),
     );
     out.push("");
+  }
+
+  if (report.graph && report.graph.nodes.length > 0) {
+    const graph = report.graph;
+    out.push("## Structure");
+    out.push("");
+    out.push(
+      `${graph.nodes.length} ${graph.granularity === "file" ? "files" : "modules"}, ` +
+        `${graph.edges.length} dependencies, ${graph.depth} layers deep.`,
+    );
+    out.push("");
+    if (graph.cycles.length > 0) {
+      out.push("**Circular dependencies**");
+      out.push("");
+      for (const cycle of graph.cycles.slice(0, 8)) out.push(`- ${formatRing(cycle)}`);
+      out.push("");
+    }
+    const hubs = [...graph.nodes]
+      .sort((a, b) => b.fanIn + b.fanOut - (a.fanIn + a.fanOut))
+      .slice(0, 5)
+      .filter((n) => n.fanIn + n.fanOut > 0);
+    if (hubs.length > 0) {
+      out.push("**Most connected**");
+      out.push("");
+      for (const hub of hubs) {
+        out.push(`- \`${hub.id}\` — ${hub.fanIn} in, ${hub.fanOut} out, layer ${hub.layer}`);
+      }
+      out.push("");
+    }
+  }
+
+  if (report.blueprint) {
+    const blueprint = report.blueprint;
+    out.push("## Target architecture");
+    out.push("");
+    out.push(blueprint.summary);
+    out.push("");
+    if (blueprint.moves.length > 0) {
+      out.push("### What should move where");
+      out.push("");
+      for (const move of blueprint.moves) {
+        out.push(`- **${move.what}**: \`${move.from}\` → \`${move.to}\` — ${move.why}`);
+      }
+      out.push("");
+    }
+    if (blueprint.stack.length > 0) {
+      out.push("### Worth modernising");
+      out.push("");
+      out.push("| Concern | Today | Recommended | Why |");
+      out.push("| --- | --- | --- | --- |");
+      for (const upgrade of blueprint.stack) {
+        out.push(
+          `| ${cell(upgrade.concern)} | ${cell(upgrade.current)} | ${cell(upgrade.recommended)} | ${cell(upgrade.why)} |`,
+        );
+      }
+      out.push("");
+    }
   }
 
   if (report.scalability) {
@@ -74,8 +134,17 @@ export function renderMarkdown(report: AnalysisReport): string {
       if (group.length === 0) continue;
       out.push(`### ${capitalize(severity)} (${group.length})`);
       out.push("");
-      for (const finding of group) out.push(...renderFinding(finding));
+      for (const finding of group) {
+        out.push(...renderFinding(finding, fixesFor(report, finding.id)));
+      }
     }
+  }
+
+  const loose = report.fixes.filter((fix) => !fix.findingId);
+  if (loose.length > 0) {
+    out.push("## Other suggested changes");
+    out.push("");
+    for (const fix of loose) out.push(...renderFix(fix));
   }
 
   out.push("---");
@@ -88,7 +157,7 @@ export function renderMarkdown(report: AnalysisReport): string {
   return out.join("\n");
 }
 
-function renderFinding(finding: Finding): string[] {
+function renderFinding(finding: Finding, fixes: CodeFix[]): string[] {
   const out: string[] = [];
   out.push(`#### ${finding.title}`);
   out.push("");
@@ -110,7 +179,34 @@ function renderFinding(finding: Finding): string[] {
     }
     out.push("");
   }
+  for (const fix of fixes) out.push(...renderFix(fix));
   return out;
+}
+
+/** A patch as a fenced diff, so it survives a paste into a PR or an issue. */
+function renderFix(fix: CodeFix): string[] {
+  const out: string[] = [];
+  out.push(
+    `**Patch — ${fix.title}** (\`${fix.file}${fix.startLine ? `:${fix.startLine}` : ""}\`)`,
+  );
+  out.push("");
+  out.push(fix.rationale);
+  out.push("");
+  out.push("```diff");
+  if (fix.kind !== "create" && fix.anchor) {
+    for (const line of fix.anchor.split("\n")) {
+      out.push(`${fix.kind === "insert-after" ? " " : "-"}${line}`);
+    }
+  }
+  for (const line of fix.replacement.split("\n")) out.push(`+${line}`);
+  out.push("```");
+  out.push("");
+  return out;
+}
+
+/** Escapes a value for a Markdown table cell. */
+function cell(text: string): string {
+  return text.replace(/\|/g, "\\|").replace(/\n+/g, " ");
 }
 
 function capitalize(text: string): string {

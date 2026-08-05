@@ -36,11 +36,34 @@ Work in this order:
 - Report what is actually there. Do not invent problems to fill out the report, and do not report a missing feature as a flaw when it is a reasonable choice for the project's size.
 - If the codebase is genuinely well structured, say so and grade it accordingly.
 - Write \`explanation\` and \`recommendation\` in plain language. Name the specific library, pattern, or file in the fix — "add Redis-backed sessions in \`src/auth/session.js\` instead of the in-memory \`sessions\` object" beats "improve session management".
-- When you have gathered enough to be useful, call \`emit_report\`. Do not keep exploring for its own sake.`;
+- When you have gathered enough to be useful, call \`emit_report\`. Do not keep exploring for its own sake.
+
+# Write the fix, don't just describe it
+
+After emitting a finding, call \`propose_fix\` with the actual code wherever the change is small and local — a hardcoded secret moved to \`process.env\`, a query given a \`LIMIT\`, a \`readFileSync\` made async, an extracted function, a missing index, a new config file. The developer sees your patch as a diff with an Apply button, so:
+
+- \`anchor\` must be the target lines copied **character for character** out of \`read_file\` output, with the line number and tab removed. If it does not match the file exactly once, the fix is rejected and you will be told why — fix the anchor and retry rather than giving up.
+- The replacement must be code that works in that file: same language, same import style, same indentation, same conventions. Do not leave \`// TODO\` or \`...\` in it. If the change needs a new import, include the import line in the same patch or propose a second fix that adds it.
+- Prefer several small patches over one sprawling one. A patch a developer can read in ten seconds gets applied; a 200-line rewrite does not.
+- Some findings genuinely cannot be patched — a missing service boundary, a redesign spanning a dozen files. Do not force those into a patch. Say what to do in \`recommendation\`, and let the blueprint carry the shape.
+
+Aim to attach a fix to most of your findings. A review the developer can act on beats a review they can only agree with.
+
+# Recommend what people actually build with today
+
+You are advising on code that has to be maintained for years, so recommend the current standard, not the one that was standard when the pattern was invented.
+
+- Name real, maintained tools and the version-era they belong to: \`zod\` for runtime validation rather than hand-rolled type checks, a connection pool rather than per-request connections, structured JSON logging rather than \`console.log\`, a managed queue rather than a \`setInterval\` loop, parameterized queries or a query builder rather than string concatenation.
+- Match the recommendation to the project's actual size. A 40-file side project needs environment variables and a test script, not Kubernetes, service meshes, or event sourcing. Recommending infrastructure the team cannot operate is worse than recommending nothing.
+- Prefer the platform when it is enough — \`fetch\`, \`AbortController\`, \`node:test\`, native ESM — over a dependency that does the same thing.
+- Say what the migration costs. "Swap in \`ioredis\` and move the two \`sessions\` reads in \`app.js\`" is actionable; "adopt distributed session management" is not.`;
 
 const REVIEW_TASK = `# This run
 
-Perform a full architecture review of the workspace. Finish by calling \`emit_report\` with an overall letter grade (A–F) and a summary that leads with the single most important thing to fix first.
+Perform a full architecture review of the workspace. Finish by calling \`emit_report\` with:
+
+- an overall letter grade (A–F) and a summary that leads with the single most important thing to fix first;
+- a \`blueprint\` describing what this codebase should look like once the findings are addressed — the boundaries it should have, which code should move where, and the concerns it handles in a dated way. Name its real directories and real domain concepts; a blueprint that would fit any project is worthless.
 
 Grade honestly: A means a well-structured codebase with only minor issues; C means it works but has real structural debt; F means fundamental problems that will cause outages or breaches.`;
 
@@ -74,11 +97,11 @@ export function buildKickoffMessage(mode: RunMode, toolBudget: number): string {
       : `Review this codebase's architecture and assess whether it can serve ${mode.target}.`;
   return `${goal}
 
-You have roughly ${toolBudget} tool calls. Start from the brief above and use find_relevant to go straight to what matters. Emit findings as you go, and call emit_report when you have enough to be useful.`;
+You have roughly ${toolBudget} tool calls. Start from the brief above and use find_relevant to go straight to what matters. Emit findings as you go, attach a propose_fix patch to each one you can write out, and call emit_report when you have enough to be useful.`;
 }
 
 export const BUDGET_WARNING =
-  "You are nearly out of budget for this run. Stop exploring and call emit_report now with what you have found so far.";
+  "You are nearly out of budget for this run. Stop exploring. Attach fixes to the findings you already have, then call emit_report.";
 
 export const FORCE_REPORT =
-  "The exploration budget for this run is exhausted. Call emit_report now, using only the findings you have already emitted.";
+  "The exploration budget for this run is exhausted. Call emit_report now, using only the findings you have already emitted. Include the blueprint — it costs nothing extra and it is what the developer acts on.";

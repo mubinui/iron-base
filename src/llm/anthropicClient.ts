@@ -137,6 +137,7 @@ export class AnthropicClient implements LlmClient {
     let detail: string | undefined;
     let inputTokens = 0;
     let outputTokens = 0;
+    let cachedInputTokens = 0;
 
     for await (const msg of readSse(response, token)) {
       let payload: any;
@@ -150,10 +151,14 @@ export class AnthropicClient implements LlmClient {
         case "message_start": {
           const usage = payload.message?.usage;
           if (usage) {
+            // Cache *creation* is billed at a premium and cache *reads* at a
+            // fraction, so the read half is tracked apart from the rest — the
+            // budget charges it at what it actually costs.
+            cachedInputTokens = usage.cache_read_input_tokens ?? 0;
             inputTokens =
               (usage.input_tokens ?? 0) +
               (usage.cache_creation_input_tokens ?? 0) +
-              (usage.cache_read_input_tokens ?? 0);
+              cachedInputTokens;
           }
           break;
         }
@@ -229,7 +234,7 @@ export class AnthropicClient implements LlmClient {
       }
     }
 
-    onEvent({ type: "usage", inputTokens, outputTokens });
+    onEvent({ type: "usage", inputTokens, outputTokens, cachedInputTokens });
 
     const content = blocks.filter(Boolean);
     const toolCalls: ToolCall[] = content

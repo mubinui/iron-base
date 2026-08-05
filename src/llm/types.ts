@@ -3,31 +3,90 @@
  * each client in this folder translates to and from its provider's wire format.
  */
 
-/** Account sign-ins only — IronBase never asks for an API key. */
-export type ProviderId = "anthropic-oauth" | "chatgpt-oauth" | "gemini-oauth";
+/**
+ * Every backend a review can run on.
+ *
+ * Three connect with the account the user already has, two take an API key, and
+ * one talks to a model running on their own machine. They are all equal here:
+ * the engine only ever sees `LlmClient`, so which one is active is a runtime
+ * choice the user can change without restarting anything.
+ */
+export type ProviderId =
+  | "anthropic-oauth"
+  | "chatgpt-oauth"
+  | "gemini-oauth"
+  | "kimi"
+  | "deepseek"
+  | "ollama";
 
 export const ALL_PROVIDERS: ProviderId[] = [
   "anthropic-oauth",
   "chatgpt-oauth",
   "gemini-oauth",
+  "kimi",
+  "deepseek",
+  "ollama",
 ];
+
+/** How a provider proves who you are, which decides its whole sign-in flow. */
+export type CredentialKind = "oauth" | "apiKey" | "local";
+
+export const PROVIDER_CREDENTIALS: Record<ProviderId, CredentialKind> = {
+  "anthropic-oauth": "oauth",
+  "chatgpt-oauth": "oauth",
+  "gemini-oauth": "oauth",
+  kimi: "apiKey",
+  deepseek: "apiKey",
+  ollama: "local",
+};
 
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   "anthropic-oauth": "Claude",
   "chatgpt-oauth": "ChatGPT",
   "gemini-oauth": "Gemini",
+  kimi: "Kimi",
+  deepseek: "DeepSeek",
+  ollama: "Ollama",
 };
 
+/**
+ * Shown directly beneath the provider's name in both the sidebar cards and the
+ * picker, so these deliberately do not repeat it — "Claude / Claude Pro or Max
+ * subscription" reads as a stutter.
+ */
 export const PROVIDER_DETAILS: Record<ProviderId, string> = {
-  "anthropic-oauth": "Claude Pro or Max subscription",
-  "chatgpt-oauth": "ChatGPT Plus or Pro subscription",
+  "anthropic-oauth": "Pro or Max subscription",
+  "chatgpt-oauth": "Plus or Pro subscription",
   "gemini-oauth": "Google account, free tier included",
+  kimi: "Moonshot API key, free tier included",
+  deepseek: "API key, pay as you go",
+  ollama: "Models on this machine, no account",
+};
+
+/** Where to get a key, shown when a provider needs one. */
+export const PROVIDER_SIGNUP: Partial<Record<ProviderId, string>> = {
+  kimi: "https://platform.moonshot.ai/console/api-keys",
+  deepseek: "https://platform.deepseek.com/api_keys",
+  ollama: "https://ollama.com/download",
 };
 
 export const DEFAULT_MODELS: Record<ProviderId, string> = {
   "anthropic-oauth": "claude-opus-5",
-  "chatgpt-oauth": "gpt-5-codex",
+  "chatgpt-oauth": "gpt-5.1-codex",
   "gemini-oauth": "gemini-2.5-pro",
+  kimi: "kimi-k2-thinking",
+  deepseek: "deepseek-reasoner",
+  ollama: "qwen3-coder:30b",
+};
+
+/**
+ * Base URLs for the providers that speak the OpenAI chat-completions dialect.
+ * Ollama's is overridable because people move it off the default port.
+ */
+export const OPENAI_COMPATIBLE_BASES: Record<"kimi" | "deepseek" | "ollama", string> = {
+  kimi: "https://api.moonshot.ai/v1",
+  deepseek: "https://api.deepseek.com/v1",
+  ollama: "http://127.0.0.1:11434/v1",
 };
 
 export interface ModelChoice {
@@ -49,15 +108,32 @@ export const MODEL_CHOICES: Record<ProviderId, ModelChoice[]> = {
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", note: "Fastest" },
   ],
   "chatgpt-oauth": [
+    { id: "gpt-5.2-codex", label: "GPT-5.2 Codex", note: "Coding-tuned" },
     { id: "gpt-5.1-codex", label: "GPT-5.1 Codex", note: "Coding-tuned" },
-    { id: "gpt-5-codex", label: "GPT-5 Codex", note: "Coding-tuned" },
+    { id: "gpt-5.1-codex-mini", label: "GPT-5.1 Codex Mini", note: "Cheapest" },
+    { id: "gpt-5-codex", label: "GPT-5 Codex", note: "Previous Codex" },
     { id: "gpt-5.1", label: "GPT-5.1", note: "General" },
-    { id: "gpt-5", label: "GPT-5", note: "Widely available" },
-    { id: "codex-mini-latest", label: "Codex Mini", note: "Cheapest" },
   ],
   "gemini-oauth": [
     { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "Most capable" },
     { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "Faster, higher quota" },
+  ],
+  kimi: [
+    { id: "kimi-k2-thinking", label: "Kimi K2 Thinking", note: "Most capable" },
+    { id: "kimi-k2-0905-preview", label: "Kimi K2", note: "Faster" },
+    { id: "moonshot-v1-128k", label: "Moonshot v1 128k", note: "Long context" },
+  ],
+  deepseek: [
+    { id: "deepseek-reasoner", label: "DeepSeek Reasoner", note: "Most capable" },
+    { id: "deepseek-chat", label: "DeepSeek Chat", note: "Faster, cheaper" },
+  ],
+  // Whatever is pulled locally wins over this list; it is only a starting point
+  // for a machine that has nothing installed yet.
+  ollama: [
+    { id: "qwen3-coder:30b", label: "Qwen3 Coder 30B", note: "Best local for code" },
+    { id: "qwen3:14b", label: "Qwen3 14B", note: "Fits in 16GB" },
+    { id: "llama3.3:70b", label: "Llama 3.3 70B", note: "Needs 48GB+" },
+    { id: "deepseek-r1:14b", label: "DeepSeek R1 14B", note: "Reasoning, local" },
   ],
 };
 
@@ -100,6 +176,12 @@ export type NeutralMessage =
        * `text` + `toolCalls` would drop the signature and 400.
        */
       raw?: unknown;
+      /**
+       * Which provider produced this turn. Only meaningful alongside `raw`:
+       * those blocks are one provider's private format, so replaying them to a
+       * different provider is guaranteed to fail. Switching mid-run drops them.
+       */
+      producedBy?: ProviderId;
     }
   | { role: "toolResult"; results: ToolResult[] };
 
@@ -124,7 +206,19 @@ export interface ChatTurn {
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "toolCallStart"; name: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number };
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      /**
+       * The part of `inputTokens` served from the provider's prompt cache.
+       *
+       * Reported separately because a cached token bills at roughly a tenth of a
+       * fresh one. Counting the two the same makes a run that is caching well
+       * look like a run that is burning its budget.
+       */
+      cachedInputTokens?: number;
+    };
 
 export interface ChatRequest {
   /** Stable across a run — cached where the provider supports prompt caching. */

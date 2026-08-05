@@ -5,10 +5,14 @@ import { runAnalysis, type ProgressEvent } from "./engine/agentLoop";
 import type { AnalysisReport } from "./engine/findings";
 import type { RunMode } from "./engine/prompts";
 import {
+  ALL_PROVIDERS,
   LlmCancelledError,
   LlmHttpError,
   MODEL_CHOICES,
+  PROVIDER_CREDENTIALS,
+  PROVIDER_DETAILS,
   PROVIDER_LABELS,
+  PROVIDER_SIGNUP,
   type LlmClient,
   type ProviderId,
 } from "./llm/types";
@@ -39,7 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
   extensionUri = context.extensionUri;
   indexStore = new IndexStore(context.globalStorageUri);
   auth = new AuthManager(context);
-  sidebar = new SidebarView();
+  sidebar = new SidebarView(context.extensionUri);
   diagnostics = new DiagnosticsPublisher(context);
 
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -54,6 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     register("ironbase.analyze", () => startRun({ kind: "review" })),
     register("ironbase.scalabilityCheck", startScalabilityCheck),
+    register("ironbase.connectAccount", connectAccount),
     register("ironbase.signInAnthropic", signInAnthropic),
     register("ironbase.signInGoogle", signInGoogle),
     register("ironbase.signInOpenAi", signInOpenAi),
@@ -89,6 +94,8 @@ async function refreshAuthState(): Promise<void> {
   const label = client ? PROVIDER_LABELS[client.id] : undefined;
   sidebar.setState({
     providerLabel: label,
+    providerId: client?.id,
+    connected: await auth.availableProviders(),
     model: client ? describeModel(client) : undefined,
   });
   statusBar.text = `$(pulse) IronBase: ${label ?? "sign in"}`;
@@ -142,14 +149,10 @@ async function startRun(mode: RunMode): Promise<void> {
   if (!client) {
     sidebar.reveal();
     const choice = await vscode.window.showWarningMessage(
-      "Connect the AI account you already have, and IronBase will use it to review your code.",
-      "Claude",
-      "ChatGPT",
-      "Gemini",
+      "Connect an AI account and IronBase will use it to review your code.",
+      "Connect an account",
     );
-    if (choice === "Claude") await signInAnthropic();
-    else if (choice === "ChatGPT") await signInOpenAi();
-    else if (choice === "Gemini") await signInGoogle();
+    if (choice === "Connect an account") await connectAccount();
     return;
   }
 
@@ -163,6 +166,7 @@ async function startRun(mode: RunMode): Promise<void> {
   sidebar.setState({
     running: true,
     findingCount: 0,
+    fixCount: 0,
     activity: "Scanning workspace…",
     startedAt: runStartedAt,
     usage: undefined,
@@ -170,6 +174,7 @@ async function startRun(mode: RunMode): Promise<void> {
   statusBar.text = "$(sync~spin) IronBase: reviewing…";
 
   let findingCount = 0;
+  let fixCount = 0;
   const onProgress = (event: ProgressEvent): void => {
     switch (event.type) {
       case "text":
@@ -185,6 +190,10 @@ async function startRun(mode: RunMode): Promise<void> {
       case "finding":
         findingCount++;
         sidebar.setState({ findingCount });
+        break;
+      case "fix":
+        fixCount++;
+        sidebar.setState({ fixCount });
         break;
       case "usage":
         lastUsage = {
@@ -236,7 +245,10 @@ async function startRun(mode: RunMode): Promise<void> {
     });
 
     const report = await runAnalysis({
-      client,
+      // Resolved per step, so switching account or model mid-review is picked up
+      // by the next request instead of needing a fresh run.
+      getClient: () => auth.getActiveClient(),
+      getFallback: (exclude) => auth.nextConnectedAfter(exclude),
       scan,
       index,
       mode,
@@ -261,13 +273,17 @@ async function startRun(mode: RunMode): Promise<void> {
         grade: report.grade,
         summary: report.summary,
         findingCount: report.findings.length,
+        fixCount: report.fixes.length,
         elapsedMs: Date.now() - runStartedAt,
         totalTokens: lastUsage
           ? lastUsage.inputTokens + lastUsage.outputTokens
           : undefined,
       },
     });
-    log.info(`Review finished: grade ${report.grade}, ${report.findings.length} findings.`);
+    log.info(
+      `Review finished: grade ${report.grade}, ${report.findings.length} findings, ` +
+        `${report.fixes.length} applicable fixes.`,
+    );
   } catch (err) {
     if (err instanceof LlmCancelledError || source.token.isCancellationRequested) {
       log.info("Review cancelled.");
@@ -297,6 +313,145 @@ function cancelRun(): void {
 }
 
 // --- Auth commands ---------------------------------------------------------
+
+/**
+ * The single front door: pick a provider, then run whatever that provider needs.
+ *
+ * There is one of these rather than a command per provider because the three
+ * ways of connecting — an OAuth round trip, pasting a key, starting a local
+ * server — are an implementation detail the user should not have to know before
+ * choosing. Every backend the engine can actually run on appears here, so the
+ * list cannot drift out of step with `ProviderId` the way the hard-coded
+ * three-account menu did.
+ */
+async function connectAccount(): Promise<void> {
+  const config = getConfig();
+  const connected = new Set(await auth.availableProviders());
+
+  interface ProviderPick extends vscode.QuickPickItem {
+    id: ProviderId;
+  }
+  const items: ProviderPick[] = [];
+  for (const id of ALL_PROVIDERS) {
+    if (config.disabledProviders.includes(id)) continue;
+    const isConnected = connected.has(id);
+    items.push({
+      id,
+      label: PROVIDER_LABELS[id],
+      description: isConnected ? "connected" : undefined,
+      detail: PROVIDER_DETAILS[id],
+    });
+  }
+  if (items.length === 0) {
+    void vscode.window.showWarningMessage(
+      "Every provider is turned off in settings (ironbase.disabledProviders).",
+    );
+    return;
+  }
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: "IronBase: Connect an account",
+    placeHolder: "Choose the account to review with",
+    matchOnDetail: true,
+  });
+  if (!picked) return;
+
+  switch (PROVIDER_CREDENTIALS[picked.id]) {
+    case "oauth":
+      if (picked.id === "anthropic-oauth") await signInAnthropic();
+      else if (picked.id === "chatgpt-oauth") await signInOpenAi();
+      else await signInGoogle();
+      return;
+    case "apiKey":
+      await signInWithApiKey(picked.id as "kimi" | "deepseek");
+      return;
+    case "local":
+      await connectOllama();
+      return;
+  }
+}
+
+/** Takes a key, checks it is plausible, and stores it in the keychain. */
+async function signInWithApiKey(id: "kimi" | "deepseek"): Promise<void> {
+  const label = PROVIDER_LABELS[id];
+  const signup = PROVIDER_SIGNUP[id];
+
+  const key = await vscode.window.showInputBox({
+    title: `Connect ${label}`,
+    prompt: signup ? `Paste your ${label} API key. Get one at ${signup}` : `Paste your ${label} API key.`,
+    placeHolder: "sk-…",
+    ignoreFocusOut: true,
+    password: true,
+    validateInput: (value) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return "Paste a key, or press Escape to cancel.";
+      // Only the shape is checked here; whether the key actually works is a
+      // question only the provider can answer, and it will on the first review.
+      if (/\s/.test(trimmed)) return "An API key does not contain spaces.";
+      if (trimmed.length < 16) return "That looks too short to be an API key.";
+      return undefined;
+    },
+  });
+  if (key === undefined) {
+    // Escaping the box is the moment to offer the console link, since the most
+    // likely reason for backing out is not having a key yet.
+    if (signup) {
+      const choice = await vscode.window.showInformationMessage(
+        `${label} needs an API key. Its free tier covers a review or two.`,
+        "Get a key",
+      );
+      if (choice === "Get a key") await vscode.env.openExternal(vscode.Uri.parse(signup));
+    }
+    return;
+  }
+
+  await auth.setApiKey(id, key);
+  await pinProvider(id);
+  await refreshAuthState();
+  void vscode.window.showInformationMessage(`IronBase is connected to ${label}.`);
+}
+
+/** Confirms a local server is actually up before calling it connected. */
+async function connectOllama(): Promise<void> {
+  const base = getConfig().ollamaBaseUrl;
+  if (await auth.hasCredential("ollama")) {
+    await pinProvider("ollama");
+    await refreshAuthState();
+    const models = await auth.listModels("ollama");
+    void vscode.window.showInformationMessage(
+      models.length > 0
+        ? `IronBase is using Ollama at ${base} (${models.length} model(s) available).`
+        : `IronBase is using Ollama at ${base}. Pull a model to review with, e.g. \`ollama pull qwen3-coder:30b\`.`,
+    );
+    return;
+  }
+
+  const choice = await vscode.window.showWarningMessage(
+    `Nothing is answering at ${base}. Start Ollama, then connect again.`,
+    "Install Ollama",
+    "Change the address",
+  );
+  if (choice === "Install Ollama") {
+    await vscode.env.openExternal(vscode.Uri.parse(PROVIDER_SIGNUP.ollama ?? "https://ollama.com"));
+  } else if (choice === "Change the address") {
+    await vscode.commands.executeCommand("workbench.action.openSettings", "ironbase.ollama");
+  }
+}
+
+/**
+ * Points the next review at the provider just connected.
+ *
+ * Without this, connecting a second account appears to do nothing: `auto`
+ * resolves in a fixed order, so a newly added provider lower down that order is
+ * ignored until the one above it is signed out.
+ */
+async function pinProvider(id: ProviderId): Promise<void> {
+  const settings = vscode.workspace.getConfiguration("ironbase");
+  await settings.update("provider", id, vscode.ConfigurationTarget.Global);
+  // The model setting belongs to whichever provider it was chosen for, so it
+  // cannot carry over — a Claude id sent to DeepSeek is a guaranteed 400.
+  await settings.update("model", "", vscode.ConfigurationTarget.Global);
+}
 
 async function signInAnthropic(): Promise<void> {
   if (getConfig().disabledProviders.includes("anthropic-oauth")) {
@@ -372,6 +527,9 @@ interface ModelPick extends vscode.QuickPickItem {
   model: string;
 }
 
+/** Sentinel for the "type your own id" row; never written to settings. */
+const CUSTOM_MODEL = "\0custom";
+
 /**
  * Offers the models of every connected account. A model id belongs to exactly
  * one provider, so choosing one pins the provider as well — otherwise a Claude
@@ -422,6 +580,14 @@ async function chooseModel(): Promise<void> {
         model: choice.id,
       });
     }
+    // Providers rename model ids without notice, and an account is sometimes
+    // entitled to one this build has never heard of. Typing it must stay possible.
+    items.push({
+      label: "$(edit) Enter a model id…",
+      description: "Type any id your account allows",
+      provider: id,
+      model: CUSTOM_MODEL,
+    });
   }
 
   const picked = await vscode.window.showQuickPick(items, {
@@ -431,14 +597,28 @@ async function chooseModel(): Promise<void> {
   });
   if (!picked || !("provider" in picked)) return;
 
+  let model = picked.model;
+  if (model === CUSTOM_MODEL) {
+    const typed = await vscode.window.showInputBox({
+      title: `Model id for ${PROVIDER_LABELS[picked.provider as ProviderId]}`,
+      prompt: "IronBase will send this id exactly as typed.",
+      placeHolder: "e.g. gpt-5.2-codex",
+      ignoreFocusOut: true,
+      validateInput: (value) =>
+        value.trim().length === 0 ? "Enter a model id, or press Escape to cancel." : undefined,
+    });
+    if (!typed) return;
+    model = typed.trim();
+  }
+
   const settings = vscode.workspace.getConfiguration("ironbase");
   await settings.update("provider", picked.provider, vscode.ConfigurationTarget.Global);
-  await settings.update("model", picked.model, vscode.ConfigurationTarget.Global);
+  await settings.update("model", model, vscode.ConfigurationTarget.Global);
   await refreshAuthState();
 
   void vscode.window.showInformationMessage(
-    picked.model
-      ? `IronBase will review with ${picked.label}.`
+    model
+      ? `IronBase will review with ${model}.`
       : picked.provider === "auto"
         ? "IronBase will choose an account and model automatically."
         : `IronBase will use ${PROVIDER_LABELS[picked.provider]}, with an automatic model.`,
@@ -562,20 +742,29 @@ async function reportError(err: unknown): Promise<void> {
 
   if (err instanceof LlmHttpError) {
     if (err.status === 401 || err.status === 403) {
-      // Which account failed depends on who is active, so offer all three.
       const active = await auth.getActiveClient();
       const label = active ? PROVIDER_LABELS[active.id] : "Your account";
+      // What "sign in again" means depends on how this provider authenticates:
+      // an expired OAuth session needs a new round trip, a rejected API key
+      // needs a new key. Sending a DeepSeek user into an Anthropic OAuth flow —
+      // which is what the old fallback did — could not have helped anyone.
+      const isKey = active !== undefined && PROVIDER_CREDENTIALS[active.id] === "apiKey";
       const choice = await vscode.window.showErrorMessage(
-        `${label} rejected the request — the session may have expired.`,
-        "Sign in again",
+        isKey
+          ? `${label} rejected the API key.`
+          : `${label} rejected the request — the session may have expired.`,
+        isKey ? "Enter a new key" : "Sign in again",
         "Use a different account",
       );
-      if (choice === "Sign in again") {
-        if (active?.id === "chatgpt-oauth") await signInOpenAi();
-        else if (active?.id === "gemini-oauth") await signInGoogle();
-        else await signInAnthropic();
+      if (choice === "Sign in again" || choice === "Enter a new key") {
+        if (active === undefined) await connectAccount();
+        else if (isKey) await signInWithApiKey(active.id as "kimi" | "deepseek");
+        else if (active.id === "chatgpt-oauth") await signInOpenAi();
+        else if (active.id === "gemini-oauth") await signInGoogle();
+        else if (active.id === "anthropic-oauth") await signInAnthropic();
+        else await connectAccount();
       } else if (choice === "Use a different account") {
-        sidebar.reveal();
+        await connectAccount();
       }
       return;
     }

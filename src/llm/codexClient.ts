@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { OPENAI_OAUTH } from "../auth/oauthClients";
 import { log } from "../util/log";
 import { abortSignalFor, readSse, throwHttpError } from "./sse";
@@ -16,17 +17,25 @@ import {
 } from "./types";
 
 /**
- * Which model a ChatGPT account may use through Codex is an entitlement that
- * differs per account and that OpenAI changes without notice — a hardcoded id
- * works for some users and 400s for others. So rather than pick one, try this
- * ladder best-first and remember whichever the account accepts.
+ * Fallback ladder, used only when the backend will not tell us what the account
+ * may use. Which model a ChatGPT account can drive through Codex is an
+ * entitlement that differs per account and that OpenAI changes without notice,
+ * so guessing is always the second-best option — see `discoverModels`.
  */
+/**
+ * Sent as the `version` header. The Codex backend keys the model list it offers
+ * on the client version, and an absent or very old one gets a reduced set.
+ */
+const CODEX_CLIENT_VERSION = "0.56.0";
+
 export const CHATGPT_MODEL_CANDIDATES = [
+  "gpt-5.2-codex",
   "gpt-5.1-codex",
+  "gpt-5.1-codex-mini",
   "gpt-5-codex",
+  "gpt-5.2",
   "gpt-5.1",
   "gpt-5",
-  "codex-mini-latest",
 ];
 
 /** The backend's wording when the account isn't entitled to a model. */
@@ -34,10 +43,23 @@ function isUnsupportedModel(err: unknown): boolean {
   return (
     err instanceof LlmHttpError &&
     err.status === 400 &&
-    /is not supported when using Codex|model is not supported|unsupported[_ ]model/i.test(
+    /is not supported when using Codex|model is not supported|unsupported[_ ]model|does not exist|invalid[_ ]model/i.test(
       err.body,
     )
   );
+}
+
+/** Pulls the human-readable half out of a JSON error body for the log. */
+function errorDetail(err: unknown): string {
+  if (!(err instanceof LlmHttpError)) return String(err);
+  try {
+    const parsed = JSON.parse(err.body) as { detail?: unknown; error?: { message?: unknown } };
+    const detail = parsed.detail ?? parsed.error?.message;
+    if (typeof detail === "string" && detail.length > 0) return detail;
+  } catch {
+    /* not JSON — fall through to the raw body */
+  }
+  return err.body.slice(0, 200);
 }
 
 /**
@@ -47,6 +69,15 @@ function isUnsupportedModel(err: unknown): boolean {
  */
 export class CodexClient implements LlmClient {
   readonly id: ProviderId = "chatgpt-oauth";
+
+  /** What the backend said this account may use. Resolved once per session. */
+  private allowed: string[] | undefined;
+  private discovery: Promise<string[] | undefined> | undefined;
+  /**
+   * One id per Codex session, sent on every request. The backend groups requests
+   * by it, and older builds gated the model list on its presence.
+   */
+  private readonly sessionId = randomUUID();
 
   constructor(
     readonly model: string,
@@ -62,13 +93,9 @@ export class CodexClient implements LlmClient {
     onEvent: (e: StreamEvent) => void,
     token: CancelToken,
   ): Promise<ChatTurn> {
-    // Try the configured model first, then work down the ladder. Each rejection
-    // is one cheap request, and the winner is cached so this happens once.
-    const candidates = this.modelPinned
-      ? [req.model]
-      : [req.model, ...CHATGPT_MODEL_CANDIDATES.filter((m) => m !== req.model)];
+    const candidates = await this.candidateModels(req.model);
 
-    let lastUnsupported: unknown;
+    const rejections: string[] = [];
     for (const model of candidates) {
       try {
         const turn = await this.attempt({ ...req, model }, onEvent, token);
@@ -79,18 +106,64 @@ export class CodexClient implements LlmClient {
         return turn;
       } catch (err) {
         if (!isUnsupportedModel(err)) throw err;
-        lastUnsupported = err;
-        log.warn(`ChatGPT account rejected model ${model}; trying the next one.`);
+        const detail = errorDetail(err);
+        rejections.push(`${model}: ${detail}`);
+        log.warn(`ChatGPT rejected ${model} — ${detail}`);
       }
     }
 
-    throw new Error(
-      this.modelPinned
-        ? `Your ChatGPT account is not entitled to "${req.model}". Run "IronBase: Choose Model…" and pick Automatic to let IronBase negotiate one.`
-        : `Your ChatGPT account is not entitled to any model IronBase knows about (tried ${candidates.join(", ")}). ` +
-          `Run \`codex\` to see which models your plan allows, then set that id in the ironbase.model setting. ` +
-          `Original response: ${lastUnsupported instanceof Error ? lastUnsupported.message : String(lastUnsupported)}`,
-    );
+    throw new Error(buildEntitlementError(candidates, rejections, this.modelPinned));
+  }
+
+  /**
+   * Which model ids to try, best first.
+   *
+   * Asking the backend beats guessing: OpenAI renames Codex model slugs without
+   * notice, and when every id in a hardcoded ladder has been retired the user
+   * gets a wall of 400s that reads like a broken extension. The discovery call
+   * is one cheap GET per session, and a failure just falls back to the ladder.
+   */
+  private async candidateModels(requested: string): Promise<string[]> {
+    if (this.modelPinned) return [requested];
+
+    const allowed = await this.discoverAllowedModels();
+    if (allowed && allowed.length > 0) {
+      // A requested id the backend did not list is still worth one attempt —
+      // the list may be partial — but it goes last rather than first.
+      const known = allowed.includes(requested);
+      return known ? [requested, ...allowed.filter((m) => m !== requested)] : [...allowed, requested];
+    }
+    return [requested, ...CHATGPT_MODEL_CANDIDATES.filter((m) => m !== requested)];
+  }
+
+  private discoverAllowedModels(): Promise<string[] | undefined> {
+    if (this.allowed) return Promise.resolve(this.allowed);
+    this.discovery ??= this.fetchAllowedModels()
+      .then((models) => {
+        if (models && models.length > 0) {
+          this.allowed = models;
+          log.info(`ChatGPT account offers: ${models.join(", ")}.`);
+        }
+        return models;
+      })
+      .catch((err) => {
+        log.warn(`Could not list ChatGPT models (${String(err)}); falling back to the ladder.`);
+        return undefined;
+      });
+    return this.discovery;
+  }
+
+  private async fetchAllowedModels(): Promise<string[] | undefined> {
+    const response = await fetch(`${OPENAI_OAUTH.codexBase}/models`, {
+      method: "GET",
+      headers: { ...(await this.headers()), accept: "application/json" },
+    });
+    if (!response.ok) {
+      log.warn(`Model list unavailable (HTTP ${response.status}).`);
+      return undefined;
+    }
+    const json = (await response.json()) as unknown;
+    return extractModelIds(json);
   }
 
   private async attempt(
@@ -106,23 +179,36 @@ export class CodexClient implements LlmClient {
     }
   }
 
+  /**
+   * The identity headers every Codex request carries. `originator`, `version`
+   * and `session_id` are what the backend uses to decide which models a client
+   * may ask for, so they belong on the model-list call as well as on inference.
+   */
+  private async headers(forceRefresh = false): Promise<Record<string, string>> {
+    const accessToken = await this.getAccessToken(forceRefresh);
+    const accountId = this.getAccountId();
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${accessToken}`,
+      "OpenAI-Beta": "responses=experimental",
+      originator: "codex_cli_rs",
+      version: CODEX_CLIENT_VERSION,
+      session_id: this.sessionId,
+    };
+    if (accountId) headers["chatgpt-account-id"] = accountId;
+    return headers;
+  }
+
   private async send(
     req: ChatRequest,
     onEvent: (e: StreamEvent) => void,
     token: CancelToken,
     forceRefresh: boolean,
   ): Promise<ChatTurn> {
-    const accessToken = await this.getAccessToken(forceRefresh);
-    const accountId = this.getAccountId();
-
     const headers: Record<string, string> = {
+      ...(await this.headers(forceRefresh)),
       "content-type": "application/json",
       accept: "text/event-stream",
-      authorization: `Bearer ${accessToken}`,
-      "OpenAI-Beta": "responses=experimental",
-      originator: "codex_cli_rs",
     };
-    if (accountId) headers["chatgpt-account-id"] = accountId;
 
     const body = {
       model: req.model,
@@ -265,6 +351,69 @@ export class CodexClient implements LlmClient {
       raw: rawItems.length > 0 ? rawItems : undefined,
     };
   }
+}
+
+/**
+ * Pulls model ids out of whatever shape the model-list endpoint returns. The
+ * response format has changed across Codex releases (`{data:[…]}`, `{models:[…]}`,
+ * a bare array, ids under `id` or `slug`), so this is deliberately shape-agnostic
+ * rather than tied to one version's contract.
+ */
+export function extractModelIds(json: unknown): string[] | undefined {
+  const list = Array.isArray(json)
+    ? json
+    : typeof json === "object" && json !== null
+      ? ((json as Record<string, unknown>).models ??
+        (json as Record<string, unknown>).data ??
+        undefined)
+      : undefined;
+  if (!Array.isArray(list)) return undefined;
+
+  const ids: string[] = [];
+  for (const entry of list) {
+    if (typeof entry === "string") {
+      ids.push(entry);
+      continue;
+    }
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    const id = record.id ?? record.slug ?? record.model ?? record.name;
+    if (typeof id === "string" && id.length > 0) ids.push(id);
+  }
+  return ids.length > 0 ? [...new Set(ids)] : undefined;
+}
+
+/**
+ * Turns a pile of 400s into something the user can act on. The three cases need
+ * different advice: a pinned id that does not exist, an account with no Codex
+ * entitlement at all, and a ladder that has simply gone stale.
+ */
+function buildEntitlementError(
+  tried: string[],
+  rejections: string[],
+  pinned: boolean,
+): string {
+  const detail = rejections[0]?.split(": ").slice(1).join(": ") ?? "";
+  const noEntitlement = /ChatGPT account|plan|subscription|entitl/i.test(detail);
+
+  if (pinned) {
+    return (
+      `Your ChatGPT account cannot use "${tried[0]}". The backend said: ${detail}\n\n` +
+      `Run "IronBase: Choose Model…" and pick Automatic to let IronBase ask your account which models it may use.`
+    );
+  }
+  if (noEntitlement) {
+    return (
+      `Your ChatGPT plan does not include Codex model access, which is what IronBase reviews with. ` +
+      `The backend said: ${detail}\n\n` +
+      `Codex needs an active ChatGPT Plus, Pro, Business, or Edu plan. If yours is active, sign out and back in to refresh the entitlement — or connect a Claude or Gemini account instead, which works the same way.`
+    );
+  }
+  return (
+    `None of the ChatGPT models IronBase tried were accepted (${tried.join(", ")}).\n\n` +
+    rejections.map((r) => `  • ${r}`).join("\n") +
+    `\n\nIf you know an id your plan allows, set it in the ironbase.model setting — IronBase will use it verbatim.`
+  );
 }
 
 function toResponsesInput(messages: NeutralMessage[]): unknown[] {

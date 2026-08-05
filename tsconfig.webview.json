@@ -11,5 +11,11 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true
   },
-  "include": ["webview/**/*.ts", "src/protocol.ts", "src/engine/findings.ts"]
+  "include": [
+    "webview/**/*.ts",
+    "src/protocol.ts",
+    "src/engine/findings.ts",
+    "src/memory/graph.ts",
+    "src/memory/symbols.ts"
+  ]
 }

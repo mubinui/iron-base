@@ -1,3 +1,5 @@
+import type { ModuleGraph } from "../memory/graph";
+
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
 
 export const SEVERITY_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -58,6 +60,63 @@ export interface Finding {
   effort?: "small" | "medium" | "large";
 }
 
+/**
+ * A concrete, applicable code change.
+ *
+ * The distinction from `Finding.recommendation` is the point: prose describing a
+ * fix cannot be wrong in a way anyone notices, but a patch either applies to the
+ * file on disk or it does not. `anchor` is text copied verbatim out of the file,
+ * so proposing a fix forces the model to have actually read the code it is
+ * rewriting, and `verified` records that we checked.
+ */
+export interface CodeFix {
+  id: string;
+  /** The finding this fixes, when it came from one. */
+  findingId?: string;
+  title: string;
+  file: string;
+  kind: "replace" | "insert-after" | "create";
+  /** Exact existing text this patch targets. Empty when kind is "create". */
+  anchor: string;
+  /** What takes its place, or follows it, or fills the new file. */
+  replacement: string;
+  /** Why this change is the right one — shown above the diff. */
+  rationale: string;
+  language?: string;
+  /** Where the anchor was found when the fix was proposed (1-based). */
+  startLine?: number;
+  endLine?: number;
+  /** True when the anchor matched the file exactly once at proposal time. */
+  verified: boolean;
+}
+
+/** One piece of code that belongs somewhere other than where it is. */
+export interface BlueprintMove {
+  what: string;
+  from: string;
+  to: string;
+  why: string;
+}
+
+/** A concern the project handles in a dated way, and what to use instead. */
+export interface StackUpgrade {
+  concern: string;
+  current: string;
+  recommended: string;
+  why: string;
+}
+
+/**
+ * What good would look like for *this* project — the shape to move toward, not
+ * a generic best-practice list. Findings say what is wrong; the blueprint says
+ * where it should end up.
+ */
+export interface Blueprint {
+  summary: string;
+  moves: BlueprintMove[];
+  stack: StackUpgrade[];
+}
+
 export interface Bottleneck {
   rank: number;
   component: string;
@@ -85,6 +144,12 @@ export interface AnalysisReport {
   grade: Grade;
   summary: string;
   findings: Finding[];
+  /** Applicable patches, each verified against the file when proposed. */
+  fixes: CodeFix[];
+  /** The target shape for this codebase, when the model produced one. */
+  blueprint?: Blueprint;
+  /** Module dependency graph, built locally from the index. */
+  graph?: ModuleGraph;
   scalability?: ScalabilityAnalysis;
   /** Set when the run stopped early (cancelled, budget exhausted, cap hit). */
   incompleteReason?: string;
@@ -92,6 +157,11 @@ export interface AnalysisReport {
   provider: string;
   model: string;
   generatedAt: string;
+}
+
+/** Fixes belonging to one finding, in the order they were proposed. */
+export function fixesFor(report: AnalysisReport, findingId: string): CodeFix[] {
+  return report.fixes.filter((fix) => fix.findingId === findingId);
 }
 
 export function severityRank(severity: Severity): number {

@@ -9,6 +9,8 @@ export interface ScannedFile {
   path: string;
   size: number;
   language: string;
+  /** Last-modified time, so the indexer can skip unchanged files without reading them. */
+  mtime: number;
 }
 
 export interface ScanResult {
@@ -134,8 +136,13 @@ export async function scanWorkspace(
         if (BINARY_EXTENSIONS.has(ext)) continue;
 
         let size = 0;
+        let mtime = 0;
         try {
-          size = (await vscode.workspace.fs.stat(childUri)).size;
+          // Already stat'ing for the size, so mtime is free — and it is what
+          // lets a repeat review skip reading unchanged files altogether.
+          const stat = await vscode.workspace.fs.stat(childUri);
+          size = stat.size;
+          mtime = stat.mtime;
         } catch {
           continue;
         }
@@ -151,6 +158,7 @@ export async function scanWorkspace(
         files.push({
           path: rel,
           size,
+          mtime,
           language: LANGUAGE_BY_EXT[ext] ?? (ext || "other"),
         });
         if (isManifest(name) && size <= MAX_MANIFEST_BYTES) manifestPaths.push(rel);

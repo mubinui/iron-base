@@ -58,18 +58,34 @@ export async function updateIndex(
     if (done % 25 === 0) onProgress?.(done, scan.files.length);
 
     const existing = index.files[file.path];
-    // Size is a free pre-filter: same size and same stored record means we only
-    // need the hash to confirm, and a different size skips the compare entirely.
+    // Size and mtime both matching means the bytes cannot have changed, so the
+    // read is pure cost. This is what makes a repeat review of an untouched
+    // repository do no file I/O at all — previously it still read and hashed
+    // every byte just to decide it had nothing to do.
+    if (
+      existing &&
+      existing.size === file.size &&
+      existing.mtime !== undefined &&
+      existing.mtime === file.mtime
+    ) {
+      stats.reused++;
+      continue;
+    }
+
+    // Size alone is still a useful pre-filter: same size means the hash decides,
+    // a different size skips the comparison entirely.
     if (existing && existing.size === file.size) {
       const bytes = await readFile(file.path, scan.root);
       if (!bytes) continue;
       const hash = hashContent(bytes);
       if (hash === existing.hash) {
+        // Record the mtime so the next run can take the cheap path above.
+        existing.mtime = file.mtime;
         stats.reused++;
         continue;
       }
       stats.bytesRead += bytes.byteLength;
-      index.files[file.path] = buildRecord(file.path, file.language, file.size, bytes, hash);
+      index.files[file.path] = buildRecord(file.path, file.language, file.size, file.mtime, bytes, hash);
       stats.reindexed++;
       continue;
     }
@@ -81,6 +97,7 @@ export async function updateIndex(
       file.path,
       file.language,
       file.size,
+      file.mtime,
       bytes,
       hashContent(bytes),
     );
@@ -99,11 +116,12 @@ function buildRecord(
   path: string,
   language: string,
   size: number,
+  mtime: number,
   bytes: Uint8Array,
   hash: string,
 ): FileRecord {
   if (bytes.byteLength > MAX_PARSE_BYTES) {
-    return { path, hash, size, loc: 0, language, symbols: [], imports: [], signals: [] };
+    return { path, hash, size, mtime, loc: 0, language, symbols: [], imports: [], signals: [] };
   }
   const content = Buffer.from(bytes).toString("utf8");
   const structure = extractStructure(content);
@@ -111,6 +129,7 @@ function buildRecord(
     path,
     hash,
     size,
+    mtime,
     loc: structure.loc,
     language,
     symbols: structure.symbols,

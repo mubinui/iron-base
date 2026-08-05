@@ -5,6 +5,7 @@ import {
   LlmHttpError,
   type LlmClient,
   type NeutralMessage,
+  type ProviderId,
   type ToolResult,
 } from "../llm/types";
 import { PROVIDER_LABELS } from "../llm/types";
@@ -12,8 +13,9 @@ import { log } from "../util/log";
 import { sleep } from "../util/limits";
 import type { ScanResult } from "../scanner/workspaceScanner";
 import { buildDigest } from "../memory/digest";
+import { buildModuleGraph } from "../memory/graph";
 import type { WorkspaceIndex } from "../memory/store";
-import { sortFindings, type AnalysisReport, type Finding } from "./findings";
+import { sortFindings, type AnalysisReport, type CodeFix, type Finding } from "./findings";
 import {
   BUDGET_WARNING,
   FORCE_REPORT,
@@ -21,10 +23,40 @@ import {
   buildSystemPrompt,
   type RunMode,
 } from "./prompts";
-import { ToolRunner, toolDefinitions, type ReportSubmission } from "./tools";
+import {
+  ToolRunner,
+  TOOL_NAMES,
+  toolDefinitions,
+  type ReportSubmission,
+  type ToolOutcome,
+} from "./tools";
+import { compactForRequest, stripForeignBlocks } from "./transcript";
 
 const MAX_TOKENS_PER_TURN = 16000;
 const MAX_RETRIES = 4;
+/**
+ * How many of a turn's tool calls run at once.
+ *
+ * The work is file I/O on the extension host, so a handful in flight hides the
+ * latency without starving the editor of its own thread.
+ */
+const MAX_PARALLEL_TOOLS = 6;
+/** A cache read bills at roughly a tenth of a fresh input token. */
+const CACHED_TOKEN_WEIGHT = 0.1;
+
+/**
+ * Tools that only read the workspace, so they are safe to run side by side.
+ *
+ * The emitting tools are absent on purpose — they mutate the run's ledger and
+ * depend on each other's effects within a turn.
+ */
+const READ_ONLY_TOOLS = new Set<string>([
+  TOOL_NAMES.findRelevant,
+  TOOL_NAMES.listSignals,
+  TOOL_NAMES.listDir,
+  TOOL_NAMES.readFile,
+  TOOL_NAMES.search,
+]);
 /** Gemini's free tier allows ~60 requests/minute; pace below that for all providers. */
 const MIN_REQUEST_INTERVAL_MS = 1200;
 
@@ -33,12 +65,20 @@ export type ProgressEvent =
   | { type: "text"; delta: string }
   | { type: "tool"; name: string }
   | { type: "finding"; finding: Finding }
+  | { type: "fix"; fix: CodeFix }
   | { type: "iteration"; current: number; max: number }
   | { type: "usage"; inputTokens: number; outputTokens: number; budget: number }
   | { type: "warning"; text: string };
 
 export interface RunOptions {
-  client: LlmClient;
+  /**
+   * Resolved before every request rather than fixed at the start, so switching
+   * provider or model in the sidebar takes effect on the next step of the review
+   * that is already running instead of requiring a fresh one.
+   */
+  getClient: () => Promise<LlmClient | undefined>;
+  /** Another connected account to continue on when this one is rate limited. */
+  getFallback?: (exclude: ProviderId) => Promise<LlmClient | undefined>;
   scan: ScanResult;
   index: WorkspaceIndex;
   mode: RunMode;
@@ -48,7 +88,35 @@ export interface RunOptions {
 }
 
 export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> {
-  const { client, scan, index, mode, config, token, onProgress } = options;
+  const { scan, index, mode, config, token, onProgress } = options;
+
+  const first = await options.getClient();
+  if (!first) throw new Error("No AI provider is connected.");
+  let client: LlmClient = first;
+
+  /**
+   * Moves the run onto another connected account when this one is rate limited.
+   *
+   * A subscription tier that has hit its cap will still be capped in thirty
+   * seconds, so backing off and trying the same account again mostly burns the
+   * review's remaining time. Anyone with a second account signed in has somewhere
+   * to go, and the transcript is provider-neutral apart from the `raw` blocks
+   * that get stripped on the way out.
+   */
+  const switchProvider = async (): Promise<boolean> => {
+    if (!config.autoFailover || !options.getFallback) return false;
+    const alternative = await options.getFallback(client.id);
+    if (!alternative || alternative.id === client.id) return false;
+    onProgress({
+      type: "warning",
+      text: `${PROVIDER_LABELS[client.id]} is rate limited — continuing on ${PROVIDER_LABELS[alternative.id]}.`,
+    });
+    log.warn(
+      `Failing over from ${PROVIDER_LABELS[client.id]} to ${PROVIDER_LABELS[alternative.id]}.`,
+    );
+    client = alternative;
+    return true;
+  };
 
   const digest = buildDigest(index, scan);
   const system = buildSystemPrompt(mode, digest);
@@ -65,10 +133,13 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     { role: "user", text: buildKickoffMessage(mode, config.maxIterations) },
   ];
   const findings: Finding[] = [];
+  const fixes: CodeFix[] = [];
   let report: ReportSubmission | undefined;
   let tokensUsed = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  /** What the budget is charged: real tokens, with cache reads at their true cost. */
+  let billedTokens = 0;
   let iteration = 0;
   let warnedAboutBudget = false;
   let incompleteReason: string | undefined;
@@ -82,6 +153,11 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     iteration++;
     onProgress({ type: "iteration", current: iteration, max: config.maxIterations });
 
+    // Re-resolved every step rather than captured once, so changing provider or
+    // model in the sidebar takes effect on the review already running. A failed
+    // resolve keeps the previous client rather than killing the run.
+    client = (await options.getClient()) ?? client;
+
     const sinceLast = Date.now() - lastRequestAt;
     if (sinceLast < MIN_REQUEST_INTERVAL_MS) {
       await sleep(MIN_REQUEST_INTERVAL_MS - sinceLast);
@@ -91,11 +167,27 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     let turn;
     try {
       turn = await callWithRetry(
-        () =>
-          client.chat(
+        () => {
+          // Rebuilt per attempt rather than once per turn, because a retry may
+          // be going to a different provider than the one this request was
+          // first shaped for, and `raw` blocks are only valid for their author.
+          //
+          // The whole transcript is re-sent every turn, so step 1 is paid for
+          // again on step 40. Old file contents are the bulk of that and stop
+          // being useful the moment a finding is written about them, so they
+          // travel as a one-line note. The full history is kept locally — only
+          // the copy going over the wire shrinks.
+          const wire = compactForRequest(stripForeignBlocks(messages, client.id));
+          if (wire.stats.resultsPruned > 0) {
+            log.info(
+              `Compacted ${wire.stats.resultsPruned} old tool result(s), ` +
+                `~${Math.round(wire.stats.charsSaved / 4).toLocaleString()} tokens saved this turn.`,
+            );
+          }
+          return client.chat(
             {
               system,
-              messages,
+              messages: wire.messages,
               tools,
               maxTokens: MAX_TOKENS_PER_TURN,
               model: client.model,
@@ -108,7 +200,15 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
               } else if (event.type === "usage") {
                 inputTokens += event.inputTokens;
                 outputTokens += event.outputTokens;
-                tokensUsed = inputTokens + outputTokens;
+                const cached = event.cachedInputTokens ?? 0;
+                // The budget exists to stop a runaway *spend*, and a cached
+                // token bills at about a tenth of a fresh one. Charging both the
+                // same made a well-cached run — which is every run, since the
+                // brief is byte-stable — look like it was burning through its
+                // budget when it was replaying the cheapest tokens available.
+                billedTokens +=
+                  event.inputTokens - cached + cached * CACHED_TOKEN_WEIGHT + event.outputTokens;
+                tokensUsed = billedTokens;
                 onProgress({
                   type: "usage",
                   inputTokens,
@@ -118,9 +218,11 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
               }
             },
             token,
-          ),
+          );
+        },
         token,
         onProgress,
+        switchProvider,
       );
     } catch (err) {
       if (err instanceof LlmCancelledError || token.isCancellationRequested) {
@@ -144,6 +246,10 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
       text: turn.text || undefined,
       toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
       raw: turn.raw,
+      // Stamped so these blocks can be stripped if a later turn goes to a
+      // different provider — Anthropic's signed thinking blocks and Codex's
+      // encrypted reasoning are a hard 400 anywhere else.
+      producedBy: client.id,
     });
 
     if (turn.toolCalls.length === 0) {
@@ -156,12 +262,38 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
       break;
     }
 
+    // Fork the lookups, keep the ledger in order.
+    //
+    // Reads, searches and index lookups only observe the workspace, so running
+    // them one await at a time just stacks up latency — those go together,
+    // bounded so a model asking for twenty files cannot flood the file system.
+    //
+    // The emitting tools are deliberately left out of that. `propose_fix` links
+    // itself to a finding by title, so it has to see the `emit_finding` from the
+    // same turn as already applied; running the two side by side loses the link
+    // and the patch turns up orphaned. They stay strictly ordered below, which
+    // also keeps finding ids matching the order the model asked for them.
+    const prefetched = new Map<number, ToolOutcome>();
+    await mapWithConcurrency(
+      turn.toolCalls
+        .map((call, i) => ({ call, i }))
+        .filter(({ call }) => READ_ONLY_TOOLS.has(call.name)),
+      MAX_PARALLEL_TOOLS,
+      async ({ call, i }) => {
+        prefetched.set(i, await runner.run(call.name, call.input));
+      },
+    );
+
     const results: ToolResult[] = [];
-    for (const call of turn.toolCalls) {
-      const outcome = await runner.run(call.name, call.input);
+    for (const [i, call] of turn.toolCalls.entries()) {
+      const outcome = prefetched.get(i) ?? (await runner.run(call.name, call.input));
       if (outcome.finding) {
         findings.push(outcome.finding);
         onProgress({ type: "finding", finding: outcome.finding });
+      }
+      if (outcome.fix) {
+        fixes.push(outcome.fix);
+        onProgress({ type: "fix", fix: outcome.fix });
       }
       if (outcome.report) {
         report = outcome.report;
@@ -189,7 +321,7 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
         });
       }
       messages.push({ role: "user", text: FORCE_REPORT });
-      report = await finalTurn(options, system, messages, tools, () => tokensUsed, runner, findings, onProgress);
+      report = await finalTurn(options, system, messages, tools, runner, findings, fixes, onProgress);
       break;
     }
     if (budgetSpent >= 0.8 && !warnedAboutBudget) {
@@ -204,7 +336,7 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
     if (!token.isCancellationRequested) {
       onProgress({ type: "status", text: "Step limit reached — asking for the report." });
       messages.push({ role: "user", text: FORCE_REPORT });
-      report = await finalTurn(options, system, messages, tools, () => tokensUsed, runner, findings, onProgress);
+      report = await finalTurn(options, system, messages, tools, runner, findings, fixes, onProgress);
     }
   }
 
@@ -217,6 +349,11 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
         ? `The review stopped early, but ${sorted.length} issue(s) were found. See the findings below.`
         : "The review stopped before producing a summary."),
     findings: sorted,
+    fixes,
+    blueprint: report?.blueprint,
+    graph: buildModuleGraph(Object.values(index.files), {
+      entryPoints: scan.entryPoints,
+    }),
     scalability: report?.scalability,
     incompleteReason,
     workspaceName: scan.rootName,
@@ -232,13 +369,15 @@ async function finalTurn(
   system: string,
   messages: NeutralMessage[],
   tools: ReturnType<typeof toolDefinitions>,
-  getTokens: () => number,
   runner: ToolRunner,
   findings: Finding[],
+  fixes: CodeFix[],
   onProgress: (event: ProgressEvent) => void,
 ): Promise<ReportSubmission | undefined> {
-  const { client, token } = options;
+  const { token } = options;
   if (token.isCancellationRequested) return undefined;
+  const client = await options.getClient();
+  if (!client) return undefined;
   try {
     const turn = await client.chat(
       { system, messages, tools, maxTokens: MAX_TOKENS_PER_TURN, model: client.model },
@@ -250,12 +389,38 @@ async function finalTurn(
     for (const call of turn.toolCalls) {
       const outcome = await runner.run(call.name, call.input);
       if (outcome.finding) findings.push(outcome.finding);
+      if (outcome.fix) fixes.push(outcome.fix);
       if (outcome.report) return outcome.report;
     }
   } catch (err) {
     log.warn(`Final report turn failed: ${String(err)}`);
   }
   return undefined;
+}
+
+/**
+ * Runs `worker` over every item with at most `limit` in flight, returning the
+ * results in input order.
+ *
+ * Workers pull from a shared cursor rather than being sliced into fixed batches,
+ * so one slow file read cannot hold up the whole group behind it.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next++;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }
 
 function gradeFromFindings(findings: Finding[]): AnalysisReport["grade"] {
@@ -273,6 +438,7 @@ async function callWithRetry<T>(
   operation: () => Promise<T>,
   token: vscode.CancellationToken,
   onProgress: (event: ProgressEvent) => void,
+  switchProvider?: () => Promise<boolean>,
 ): Promise<T> {
   let attempt = 0;
   while (true) {
@@ -286,6 +452,14 @@ async function callWithRetry<T>(
 
       attempt++;
       const httpErr = err as LlmHttpError;
+
+      // A rate limit is the one failure another account can answer immediately,
+      // so try that before sleeping. Waiting out a subscription cap can cost
+      // minutes of a review that has a step budget to spend.
+      if (httpErr.status === 429 && switchProvider && (await switchProvider())) {
+        continue;
+      }
+
       const waitMs = httpErr.retryAfterSeconds
         ? httpErr.retryAfterSeconds * 1000
         : Math.min(30_000, 1000 * 2 ** attempt);

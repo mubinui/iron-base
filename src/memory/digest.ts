@@ -1,5 +1,6 @@
 import { formatBytes } from "../util/limits";
 import type { ScanResult } from "../scanner/workspaceScanner";
+import { buildModuleGraph, describeGraph } from "./graph";
 import { countSignals } from "./retrieval";
 import { classifyPriorFindings, type WorkspaceIndex } from "./store";
 import { RISK_SIGNALS, SIGNAL_LABELS, type SignalKind } from "./symbols";
@@ -130,6 +131,16 @@ export function buildDigest(index: WorkspaceIndex, scan: ScanResult): string {
   lines.push("");
   lines.push("## Layout");
   lines.push(...directorySummary(records));
+
+  // The dependency graph is the part of the brief the model cannot reconstruct
+  // by reading files one at a time: cycles and hub modules are properties of the
+  // whole import graph, and they point straight at the structural problems.
+  const graph = buildModuleGraph(records, { entryPoints: scan.entryPoints });
+  const graphLines = describeGraph(graph);
+  if (graphLines.length > 0) {
+    lines.push("");
+    lines.push(...graphLines);
+  }
 
   if (scan.manifests.length > 0) {
     lines.push("");

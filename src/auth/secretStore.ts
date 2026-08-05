@@ -12,6 +12,8 @@ const KEYS = {
   anthropicOAuth: "ironbase.auth.anthropic",
   openaiOAuth: "ironbase.auth.openai",
   googleOAuth: "ironbase.auth.google",
+  kimiKey: "ironbase.auth.kimi",
+  deepseekKey: "ironbase.auth.deepseek",
 } as const;
 
 export type SecretKey = keyof typeof KEYS;

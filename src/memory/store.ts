@@ -11,6 +11,11 @@ export interface FileRecord {
   /** Content hash — the whole point of the cache: unchanged files are skipped. */
   hash: string;
   size: number;
+  /**
+   * Last-modified time when this record was built. Absent on records written by
+   * older versions, which simply fall back to hashing.
+   */
+  mtime?: number;
   loc: number;
   language: string;
   symbols: CodeSymbol[];

@@ -7,14 +7,25 @@ process memory so the app can never run on more than one server, and shows you t
 where that happens. It is built for developers who can ship a working app but haven't yet
 had someone senior look over their shoulder.
 
-Two things it does:
+What it does:
 
-- **Analyze architecture** — finds the structural problems that will hurt as the project
-  grows, each with a real file and line, why it matters, and a concrete fix.
+- **Maps your architecture.** A dependency graph built from your imports, laid out by
+  depth: what sits on top, what everything rests on, and which modules import each other
+  in a ring. Click a module to see what depends on it and what was found inside it.
+- **Finds the structural problems** that will hurt as the project grows, each with a real
+  file and line, why it matters, and what to do about it.
+- **Writes the patch.** Where a fix is small enough to write out, you get a diff with an
+  Apply button. Every patch is checked against the file when it is proposed *and* again
+  the moment you apply it, so a stale patch is refused rather than silently applied to
+  code that has moved on.
+- **Draws the target.** A blueprint of what this codebase should look like — which code
+  belongs elsewhere, and which concerns it handles in a dated way — named after your own
+  directories, not in the abstract.
 - **Scalability check** — you say "I want to serve 10,000 concurrent users"; it estimates
   what the code handles today, ranks what caps it, and lays out a phased plan.
 
-Findings also land in the Problems panel, and the report exports to Markdown.
+Findings also land in the Problems panel, and the whole report exports to Markdown with
+the patches as fenced diffs.
 
 ## No API keys. Ever.
 
@@ -101,6 +112,12 @@ the exact matching lines. It opens a file only once the index says it matters.
 On a re-review the model is told which issues sit in untouched code (still open) and which
 sit in code you've since changed (check these first), so it spends its budget on what moved.
 
+**6. The dependency graph, computed locally.** Import statements are resolved to real
+files, rolled up into modules, and checked for cycles and hub modules. That analysis costs
+no tokens, it drives the Architecture map, and a summary of it goes into the brief — so the
+model starts out knowing which modules are tangled, which is not something it could work
+out by reading files one at a time.
+
 ## Trust: every reference is verified
 
 Before any finding reaches you, its file and line are checked against the real filesystem.
@@ -108,6 +125,14 @@ A finding citing a file that doesn't exist is rejected and the model is told to 
 A line number that has drifted is re-anchored using the snippet the model quoted. Only
 verified references become clickable links and squiggles — which is why a link in the report
 actually goes somewhere.
+
+The same standard applies to patches, and this is what makes the Apply button safe to
+press. A patch has to quote the exact lines it targets; if that text isn't in the file, or
+appears more than once, the patch is rejected at review time and the model is sent back to
+read the code properly. The check runs again when you click Apply, against the file as it
+is right then — so if you have edited that code since, IronBase tells you the patch is
+stale instead of writing it over your work. Applied changes land unsaved in your editor,
+inside the normal undo stack.
 
 ## Getting started
 

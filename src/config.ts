@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { ProviderId } from "./llm/types";
+import { OPENAI_COMPATIBLE_BASES, type ProviderId } from "./llm/types";
 
 export interface IronBaseConfig {
   provider: ProviderId | "auto";
@@ -14,6 +14,10 @@ export interface IronBaseConfig {
   /** Google OAuth client for Gemini sign-in; supplied by the user, not shipped. */
   googleClientId: string;
   googleClientSecret: string;
+  /** Where the local model server listens. */
+  ollamaBaseUrl: string;
+  /** Continue on another connected account when one is rate limited. */
+  autoFailover: boolean;
 }
 
 export function getConfig(): IronBaseConfig {
@@ -30,6 +34,11 @@ export function getConfig(): IronBaseConfig {
     disabledProviders: c.get<ProviderId[]>("disabledProviders", []),
     googleClientId: c.get<string>("google.clientId", "").trim(),
     googleClientSecret: c.get<string>("google.clientSecret", "").trim(),
+    ollamaBaseUrl: c
+      .get<string>("ollama.baseUrl", OPENAI_COMPATIBLE_BASES.ollama)
+      .trim()
+      .replace(/\/+$/, ""),
+    autoFailover: c.get<boolean>("autoFailover", true),
   };
 }
 

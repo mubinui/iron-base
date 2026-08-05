@@ -1,8 +1,8 @@
 {
   "name": "ironbase",
   "displayName": "IronBase — Architecture Review",
-  "description": "AI-powered architecture review and scalability analysis. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
-  "version": "0.3.0",
+  "description": "AI architecture review with a dependency map, verified one-click code fixes, and a modernization blueprint. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
+  "version": "0.4.0",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {
@@ -33,7 +33,11 @@
     "code review",
     "ai",
     "claude",
-    "gemini"
+    "gemini",
+    "dependency graph",
+    "refactoring",
+    "code quality",
+    "technical debt"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [],
@@ -50,6 +54,11 @@
         "title": "Scalability Check…",
         "category": "IronBase",
         "icon": "$(graph-line)"
+      },
+      {
+        "command": "ironbase.connectAccount",
+        "title": "Connect an Account…",
+        "category": "IronBase"
       },
       {
         "command": "ironbase.signInAnthropic",
@@ -134,13 +143,19 @@
             "auto",
             "anthropic-oauth",
             "chatgpt-oauth",
-            "gemini-oauth"
+            "gemini-oauth",
+            "kimi",
+            "deepseek",
+            "ollama"
           ],
           "enumDescriptions": [
             "Use the first connected account",
             "Claude (Pro or Max subscription)",
             "ChatGPT (Plus or Pro subscription)",
-            "Gemini (Google account, free tier included)"
+            "Gemini (Google account, free tier included)",
+            "Kimi (Moonshot API key, free tier included)",
+            "DeepSeek (API key, pay as you go)",
+            "Ollama (models on this machine, no account)"
           ],
           "default": "auto",
           "description": "Which connected account to review with."
@@ -208,11 +223,24 @@
             "enum": [
               "anthropic-oauth",
               "chatgpt-oauth",
-              "gemini-oauth"
+              "gemini-oauth",
+              "kimi",
+              "deepseek",
+              "ollama"
             ]
           },
           "default": [],
           "description": "Accounts to hide (kill-switch, e.g. if a sign-in flow breaks upstream)."
+        },
+        "ironbase.ollama.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:11434/v1",
+          "description": "Where the local Ollama server listens. Change this if you moved it off the default port."
+        },
+        "ironbase.autoFailover": {
+          "type": "boolean",
+          "default": true,
+          "description": "When one account is rate limited mid-review, continue on another connected account instead of waiting."
         }
       }
     }
@@ -222,7 +250,8 @@
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
     "vscode:prepublish": "npm run build -- --production",
-    "package": "vsce package"
+    "package": "vsce package",
+    "test": "vitest run"
   },
   "dependencies": {
     "ignore": "^5.3.1"
@@ -232,6 +261,7 @@
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^2.24.0",
     "esbuild": "^0.20.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.10"
   }
 }

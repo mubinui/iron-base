@@ -17,23 +17,28 @@ const extensionConfig = {
   logLevel: "info",
 };
 
-/** @type {import('esbuild').BuildOptions} */
-const webviewConfig = {
-  entryPoints: ["webview/main.ts"],
+/** Both webviews bundle the same way; only the entry point differs. */
+const webviewConfig = (entry, out) => ({
+  entryPoints: [entry],
   bundle: true,
   format: "iife",
   platform: "browser",
   target: "es2022",
-  outfile: "dist/webview.js",
+  outfile: out,
   sourcemap: !production,
   minify: production,
   logLevel: "info",
-};
+});
+
+const configs = [
+  extensionConfig,
+  webviewConfig("webview/main.ts", "dist/webview.js"),
+  webviewConfig("webview/sidebar.ts", "dist/sidebar.js"),
+];
 
 if (watch) {
-  const ctx1 = await esbuild.context(extensionConfig);
-  const ctx2 = await esbuild.context(webviewConfig);
-  await Promise.all([ctx1.watch(), ctx2.watch()]);
+  const contexts = await Promise.all(configs.map((c) => esbuild.context(c)));
+  await Promise.all(contexts.map((c) => c.watch()));
 } else {
-  await Promise.all([esbuild.build(extensionConfig), esbuild.build(webviewConfig)]);
+  await Promise.all(configs.map((c) => esbuild.build(c)));
 }
