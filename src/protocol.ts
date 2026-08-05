@@ -24,5 +24,14 @@ export interface SidebarState {
   activity?: string;
   iteration?: { current: number; max: number };
   findingCount: number;
-  lastSummary?: { grade: string; summary: string; findingCount: number };
+  /** Epoch ms the current run began, so the UI can tick an elapsed timer. */
+  startedAt?: number;
+  usage?: { inputTokens: number; outputTokens: number; budget: number };
+  lastSummary?: {
+    grade: string;
+    summary: string;
+    findingCount: number;
+    elapsedMs?: number;
+    totalTokens?: number;
+  };
 }

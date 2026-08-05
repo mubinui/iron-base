@@ -34,9 +34,144 @@ function render(report: AnalysisReport): void {
   root.replaceChildren(
     header(report),
     ...(report.scalability ? [scalabilitySection(report.scalability)] : []),
+    ...(report.findings.length > 0 ? [hotspotTree(report.findings)] : []),
     findingsSection(report.findings),
     footer(report),
   );
+}
+
+interface TreeNode {
+  name: string;
+  path: string;
+  children: Map<string, TreeNode>;
+  /** Findings whose evidence points at this exact file. */
+  findings: Array<{ finding: Finding; line?: number }>;
+}
+
+/**
+ * A map of where the problems actually are.
+ *
+ * Only paths carrying findings (and their ancestors) are shown — a full project
+ * tree would bury the signal. Each directory rolls up the worst severity beneath
+ * it, so the eye lands on the affected branch before reading a single filename.
+ */
+function hotspotTree(findings: Finding[]): HTMLElement {
+  const section = document.createElement("section");
+  section.append(tag("h2", "Where the problems are"));
+
+  const root_: TreeNode = { name: "", path: "", children: new Map(), findings: [] };
+  let fileCount = 0;
+
+  for (const finding of findings) {
+    const seen = new Set<string>();
+    for (const evidence of finding.evidence) {
+      if (seen.has(evidence.file)) continue;
+      seen.add(evidence.file);
+      const parts = evidence.file.split("/");
+      let node = root_;
+      for (let i = 0; i < parts.length; i++) {
+        const isLeaf = i === parts.length - 1;
+        let child = node.children.get(parts[i]);
+        if (!child) {
+          child = {
+            name: parts[i],
+            path: parts.slice(0, i + 1).join("/"),
+            children: new Map(),
+            findings: [],
+          };
+          node.children.set(parts[i], child);
+          if (isLeaf) fileCount++;
+        }
+        node = child;
+      }
+      node.findings.push({ finding, line: evidence.startLine });
+    }
+  }
+
+  section.append(
+    tag(
+      "p",
+      `${findings.length} finding${findings.length === 1 ? "" : "s"} across ${fileCount} file${fileCount === 1 ? "" : "s"}. Click any line to open it.`,
+      "tree-caption",
+    ),
+  );
+
+  const tree = div("tree");
+  for (const child of sortedChildren(root_)) renderNode(child, tree, 0);
+  section.append(tree);
+  return section;
+}
+
+function sortedChildren(node: TreeNode): TreeNode[] {
+  // Worst-affected branches first; directories before files at equal severity.
+  return [...node.children.values()].sort((a, b) => {
+    const sa = worstSeverity(a);
+    const sb = worstSeverity(b);
+    if (sa !== sb) return sa - sb;
+    const da = a.children.size > 0 ? 0 : 1;
+    const db = b.children.size > 0 ? 0 : 1;
+    if (da !== db) return da - db;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/** Lowest index in SEVERITY_ORDER anywhere in this subtree (0 = critical). */
+function worstSeverity(node: TreeNode): number {
+  let worst = SEVERITY_ORDER.length;
+  for (const { finding } of node.findings) {
+    worst = Math.min(worst, SEVERITY_ORDER.indexOf(finding.severity));
+  }
+  for (const child of node.children.values()) {
+    worst = Math.min(worst, worstSeverity(child));
+  }
+  return worst;
+}
+
+function countIn(node: TreeNode): number {
+  let n = node.findings.length;
+  for (const child of node.children.values()) n += countIn(child);
+  return n;
+}
+
+function renderNode(node: TreeNode, parent: HTMLElement, depth: number): void {
+  const isDir = node.children.size > 0;
+  const worst = worstSeverity(node);
+  const severity = SEVERITY_ORDER[Math.min(worst, SEVERITY_ORDER.length - 1)];
+
+  const row = div(isDir ? "tree-row dir" : "tree-row file");
+  row.style.paddingLeft = `${depth * 14}px`;
+
+  const rail = div("rail");
+  rail.style.background = SEVERITY_COLOR[severity];
+  row.append(rail);
+
+  row.append(tag("span", isDir ? `${node.name}/` : node.name, "tree-name"));
+
+  const total = countIn(node);
+  if (isDir) {
+    row.append(tag("span", `${total}`, "tree-count"));
+  }
+  parent.append(row);
+
+  // Each finding on this file gets its own clickable line.
+  for (const { finding, line } of node.findings) {
+    const item = div("tree-finding");
+    item.style.paddingLeft = `${(depth + 1) * 14}px`;
+    const dot = div("dot");
+    dot.style.background = SEVERITY_COLOR[finding.severity];
+    item.append(dot);
+    item.append(tag("span", finding.title, "tree-finding-title"));
+    if (line !== undefined) {
+      item.append(tag("span", `:${line}`, "tree-line"));
+    }
+    item.title = `${finding.severity} — ${CATEGORY_LABELS[finding.category]}`;
+    item.addEventListener("click", () =>
+      vscode.postMessage({ type: "openFile", file: node.path, line }),
+    );
+    parent.append(item);
+  }
+
+  for (const child of sortedChildren(node)) renderNode(child, parent, depth + 1);
 }
 
 function header(report: AnalysisReport): HTMLElement {

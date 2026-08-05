@@ -138,7 +138,15 @@ async function startRun(mode: RunMode): Promise<void> {
   activeRun = source;
   lastRoot = folder.uri;
   sidebar.reveal();
-  sidebar.setState({ running: true, findingCount: 0, activity: "Scanning workspace…" });
+  const runStartedAt = Date.now();
+  let lastUsage: { inputTokens: number; outputTokens: number; budget: number } | undefined;
+  sidebar.setState({
+    running: true,
+    findingCount: 0,
+    activity: "Scanning workspace…",
+    startedAt: runStartedAt,
+    usage: undefined,
+  });
   statusBar.text = "$(sync~spin) IronBase: reviewing…";
 
   let findingCount = 0;
@@ -157,6 +165,14 @@ async function startRun(mode: RunMode): Promise<void> {
       case "finding":
         findingCount++;
         sidebar.setState({ findingCount });
+        break;
+      case "usage":
+        lastUsage = {
+          inputTokens: event.inputTokens,
+          outputTokens: event.outputTokens,
+          budget: event.budget,
+        };
+        sidebar.setState({ usage: lastUsage });
         break;
       case "warning":
         sidebar.noteWarning(event.text);
@@ -225,6 +241,10 @@ async function startRun(mode: RunMode): Promise<void> {
         grade: report.grade,
         summary: report.summary,
         findingCount: report.findings.length,
+        elapsedMs: Date.now() - runStartedAt,
+        totalTokens: lastUsage
+          ? lastUsage.inputTokens + lastUsage.outputTokens
+          : undefined,
       },
     });
     log.info(`Review finished: grade ${report.grade}, ${report.findings.length} findings.`);
@@ -237,7 +257,12 @@ async function startRun(mode: RunMode): Promise<void> {
   } finally {
     activeRun = undefined;
     source.dispose();
-    sidebar.setState({ running: false, activity: undefined, iteration: undefined });
+    sidebar.setState({
+      running: false,
+      activity: undefined,
+      iteration: undefined,
+      startedAt: undefined,
+    });
     await refreshAuthState();
   }
 }

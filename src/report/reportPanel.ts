@@ -381,6 +381,50 @@ a.ref {
 }
 a.ref:hover { background: var(--surface-raised); text-decoration: underline; }
 
+/* ---- Hotspot tree: where the problems actually are ---- */
+
+.tree-caption { color: var(--ink-muted); font-size: 12.5px; margin: 0 0 var(--space-3); }
+.tree {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-2) 0;
+  overflow-x: auto;
+}
+.tree-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 3px var(--space-4) 3px 0;
+  font-size: 12.5px; white-space: nowrap;
+}
+.tree-row .rail {
+  width: 2px; height: 14px; border-radius: 1px; flex: 0 0 auto; opacity: 0.55;
+}
+.tree-row.dir .tree-name { font-weight: 600; }
+.tree-row.file .tree-name {
+  font-family: var(--vscode-editor-font-family); font-size: 12px;
+}
+.tree-count {
+  font-size: 10.5px; color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--hairline); border-radius: 999px;
+  padding: 0 6px; margin-left: var(--space-1);
+}
+.tree-finding {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 3px var(--space-4) 3px 0;
+  font-size: 12.5px; cursor: pointer; white-space: nowrap;
+  border-radius: 4px; transition: background 100ms ease;
+}
+.tree-finding:hover { background: var(--surface-raised); }
+.tree-finding .dot {
+  width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; margin-left: 8px;
+}
+.tree-finding-title { overflow: hidden; text-overflow: ellipsis; }
+.tree-line {
+  font-family: var(--vscode-editor-font-family); font-size: 11px;
+  color: var(--vscode-textLink-foreground); flex: 0 0 auto;
+}
+
 /* ---- Scalability: a meter, not a gauge ---- */
 
 .capacity-card {

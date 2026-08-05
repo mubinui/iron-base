@@ -145,13 +145,31 @@ button.link:hover { text-decoration: underline; }
   background: var(--surface); border: 1px solid var(--hairline);
 }
 .status .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.pulse {
-  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto;
-  background: var(--vscode-progressBar-background, var(--vscode-textLink-foreground));
-  animation: pulse 1.6s ease-in-out infinite;
+.status .headline { font-weight: 600; font-size: 12.5px; flex: 1; }
+
+/* Rotating glyph — motion signals "working" more honestly than a static dot. */
+.glyph {
+  flex: 0 0 auto; width: 13px; height: 13px;
+  color: var(--vscode-progressBar-background, var(--vscode-textLink-foreground));
+  animation: spin 1.5s linear infinite;
 }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-.status .headline { font-weight: 600; font-size: 12.5px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Live telemetry row: elapsed, tokens in, tokens out. */
+.telemetry {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--hairline);
+  font-variant-numeric: tabular-nums;
+}
+.stat { display: flex; align-items: baseline; gap: 3px; }
+.stat .v { font-size: 13px; font-weight: 600; }
+.stat .k { font-size: 10px; color: var(--ink-muted); letter-spacing: 0.03em; }
+.stat .arrow { font-size: 10px; color: var(--ink-muted); }
+.budget {
+  height: 2px; border-radius: 999px; margin-top: 8px; overflow: hidden;
+  background: var(--surface-raised);
+}
+.budget-fill { height: 100%; border-radius: 999px; transition: width 400ms ease; }
 .status .activity {
   color: var(--ink-muted); font-size: 11.5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -228,7 +246,7 @@ const ACCOUNTS = [
 window.addEventListener("message", (event) => {
   const msg = event.data;
   if (msg.type === "state") {
-    if (!msg.state.running) { stream = ""; warning = ""; }
+    if (!msg.state.running) { stream = ""; warning = ""; clearInterval(timerId); }
     render(msg.state);
   } else if (msg.type === "progressText") {
     stream = (stream + msg.delta).slice(-4000);
@@ -280,6 +298,54 @@ function accountCard(account) {
   return card;
 }
 
+
+function glyph() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("class", "glyph");
+  const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+  c.setAttribute("cx", "8"); c.setAttribute("cy", "8"); c.setAttribute("r", "6");
+  c.setAttribute("fill", "none"); c.setAttribute("stroke", "currentColor");
+  c.setAttribute("stroke-width", "2"); c.setAttribute("stroke-linecap", "round");
+  c.setAttribute("stroke-dasharray", "28"); c.setAttribute("stroke-dashoffset", "20");
+  svg.append(c);
+  return svg;
+}
+
+function stat(value, label, arrow) {
+  const wrap = el("span", undefined, "stat");
+  if (arrow) wrap.append(el("span", arrow, "arrow"));
+  wrap.append(el("span", value, "v"), el("span", label, "k"));
+  return wrap;
+}
+
+function fmtTokens(n) {
+  if (!n) return "0";
+  if (n < 1000) return String(n);
+  if (n < 1000000) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + "k";
+  return (n / 1000000).toFixed(1) + "M";
+}
+
+function fmtDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + "s";
+  const m = Math.floor(s / 60);
+  return m + "m " + (s % 60) + "s";
+}
+
+let timerId;
+function startTimer(startedAt) {
+  clearInterval(timerId);
+  if (!startedAt) return;
+  const tick = () => {
+    const el2 = document.getElementById("elapsed");
+    if (!el2) { clearInterval(timerId); return; }
+    el2.textContent = fmtDuration(Date.now() - startedAt);
+  };
+  tick();
+  timerId = setInterval(tick, 1000);
+}
+
 function render(state) {
   const nodes = [];
 
@@ -295,27 +361,39 @@ function render(state) {
   if (state.running) {
     const status = el("div", undefined, "status");
     const top = el("div", undefined, "top");
-    top.append(el("span", undefined, "pulse"), el("span", "Reviewing", "headline"));
+    top.append(glyph(), el("span", "Reviewing", "headline"));
+    if (state.iteration) {
+      top.append(el("span", state.iteration.current + "/" + state.iteration.max, "muted"));
+    }
     status.append(top);
 
-    const activity = el("div", state.activity || "Thinking…", "activity");
+    const activity = el("div", state.activity || "Thinking\u2026", "activity");
     activity.id = "activity";
     status.append(activity);
 
-    if (state.iteration) {
-      const track = el("div", undefined, "track");
-      const fill = el("div", undefined, "track-fill");
-      fill.style.width = Math.round((state.iteration.current / state.iteration.max) * 100) + "%";
-      track.append(fill);
-      status.append(track);
-    }
+    // Elapsed + token spend, the two numbers that tell you a long run is healthy.
+    const tel = el("div", undefined, "telemetry");
+    const elapsed = stat("0s", "elapsed");
+    elapsed.querySelector(".v").id = "elapsed";
+    tel.append(elapsed);
+    const u = state.usage;
+    tel.append(stat(fmtTokens(u ? u.inputTokens : 0), "in", "\u2191"));
+    tel.append(stat(fmtTokens(u ? u.outputTokens : 0), "out", "\u2193"));
     if (state.findingCount > 0) {
-      const counter = el("div", undefined, "counter");
-      counter.append(
-        el("span", String(state.findingCount), "n"),
-        el("span", state.findingCount === 1 ? "finding so far" : "findings so far", "label"),
-      );
-      status.append(counter);
+      tel.append(stat(String(state.findingCount), state.findingCount === 1 ? "finding" : "findings"));
+    }
+    status.append(tel);
+
+    if (u && u.budget > 0) {
+      const used = (u.inputTokens + u.outputTokens) / u.budget;
+      const bar = el("div", undefined, "budget");
+      const fill = el("div", undefined, "budget-fill");
+      fill.style.width = Math.min(100, used * 100).toFixed(1) + "%";
+      fill.style.background = used > 0.8
+        ? "var(--sev-medium)"
+        : "var(--vscode-progressBar-background, var(--vscode-textLink-foreground))";
+      bar.append(fill);
+      status.append(bar);
     }
     nodes.push(status);
 
@@ -328,6 +406,7 @@ function render(state) {
     streamEl.id = "stream";
     nodes.push(streamEl);
     root.replaceChildren(...nodes);
+    startTimer(state.startedAt);
     return;
   }
 
@@ -341,8 +420,11 @@ function render(state) {
     result.append(el("div", state.lastSummary.grade, "grade grade-" + state.lastSummary.grade));
     const body = el("div", undefined, "body");
     const n = state.lastSummary.findingCount;
+    const meta = [];
+    if (state.lastSummary.elapsedMs) meta.push(fmtDuration(state.lastSummary.elapsedMs));
+    if (state.lastSummary.totalTokens) meta.push(fmtTokens(state.lastSummary.totalTokens) + " tokens");
     body.append(
-      el("div", n + (n === 1 ? " finding" : " findings"), "count"),
+      el("div", n + (n === 1 ? " finding" : " findings") + (meta.length ? "  ·  " + meta.join("  ·  ") : ""), "count"),
       el("div", state.lastSummary.summary, "sum"),
     );
     result.append(body);

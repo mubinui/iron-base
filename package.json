@@ -2,7 +2,7 @@
   "name": "ironbase",
   "displayName": "IronBase — Architecture Review",
   "description": "AI-powered architecture review and scalability analysis. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {

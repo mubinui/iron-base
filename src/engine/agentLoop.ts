@@ -34,6 +34,7 @@ export type ProgressEvent =
   | { type: "tool"; name: string }
   | { type: "finding"; finding: Finding }
   | { type: "iteration"; current: number; max: number }
+  | { type: "usage"; inputTokens: number; outputTokens: number; budget: number }
   | { type: "warning"; text: string };
 
 export interface RunOptions {
@@ -66,6 +67,8 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
   const findings: Finding[] = [];
   let report: ReportSubmission | undefined;
   let tokensUsed = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
   let iteration = 0;
   let warnedAboutBudget = false;
   let incompleteReason: string | undefined;
@@ -103,7 +106,15 @@ export async function runAnalysis(options: RunOptions): Promise<AnalysisReport> 
               } else if (event.type === "toolCallStart") {
                 onProgress({ type: "tool", name: event.name });
               } else if (event.type === "usage") {
-                tokensUsed += event.inputTokens + event.outputTokens;
+                inputTokens += event.inputTokens;
+                outputTokens += event.outputTokens;
+                tokensUsed = inputTokens + outputTokens;
+                onProgress({
+                  type: "usage",
+                  inputTokens,
+                  outputTokens,
+                  budget: config.maxSessionTokens,
+                });
               }
             },
             token,
