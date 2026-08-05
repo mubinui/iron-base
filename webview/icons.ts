@@ -26,6 +26,20 @@ export type IconName =
   | "signOut"
   | "switchAccount"
   | "play"
+  | "compass"
+  | "hammer"
+  | "coin"
+  | "context"
+  | "terminal"
+  | "pencil"
+  | "filePlus"
+  | "trash"
+  | "checklist"
+  | "sparkles"
+  | "plug"
+  | "send"
+  | "stopCircle"
+  | "flag"
   | "gauge"
   | "graph"
   | "wrench"
@@ -240,6 +254,121 @@ const GLYPHS: Record<IconName, Glyph> = {
   play: {
     box: 24,
     strokes: ["M8 4.8 L19 12 L8 19.2 Z"],
+  },
+
+  // --- The build conversation ----------------------------------------------
+  //
+  // Every kind of thing the agent does gets its own glyph. A transcript is
+  // scanned, not read: you are looking for "where did it start editing" in a
+  // wall of grey lines, and shape finds that far faster than a word does. The
+  // set is deliberately one weight and one geometry so it reads as a family.
+
+  /** Architect mode — orienting before moving. */
+  compass: {
+    box: 24,
+    strokes: ["M14.8 9.2 L13 13 L9.2 14.8 L11 11 Z"],
+    circles: [{ cx: 12, cy: 12, r: 8.8 }],
+  },
+  /** Build mode. */
+  hammer: {
+    box: 24,
+    strokes: [
+      "M13.5 6.5 L17.5 2.5 L21.5 6.5 L17.5 10.5 Z",
+      "M15.5 8.5 L9 15",
+      "M10.5 12 L4 18.5 A2.1 2.1 0 0 0 7 21.5 L13.5 15",
+    ],
+  },
+  /** What this has cost. */
+  coin: {
+    box: 24,
+    strokes: ["M12 7.5 V16.5", "M14.4 10 A2.6 2.6 0 0 0 9.8 11.4 C9.8 14 14.2 13 14.2 15.4 A2.6 2.6 0 0 1 9.6 14"],
+    circles: [{ cx: 12, cy: 12, r: 9 }],
+    width: 1.6,
+  },
+  /** How full the context window is. */
+  context: {
+    box: 24,
+    strokes: [
+      "M3.5 8 A1.5 1.5 0 0 1 5 6.5 H17 A1.5 1.5 0 0 1 18.5 8 V16 A1.5 1.5 0 0 1 17 17.5 H5 A1.5 1.5 0 0 1 3.5 16 Z",
+      "M21 10 V14",
+    ],
+    circles: [],
+  },
+  terminal: {
+    box: 24,
+    strokes: ["M5 7.5 L9.5 12 L5 16.5", "M12.5 16.5 H19"],
+  },
+  pencil: {
+    box: 24,
+    strokes: [
+      "M4 20 L4.9 16.1 L15.7 5.3 A2 2 0 0 1 18.5 5.3 L18.7 5.5 A2 2 0 0 1 18.7 8.3 L7.9 19.1 Z",
+      "M14.2 6.8 L17.2 9.8",
+    ],
+  },
+  filePlus: {
+    box: 24,
+    strokes: [
+      "M13.5 3.5 H7 A1.5 1.5 0 0 0 5.5 5 V19 A1.5 1.5 0 0 0 7 20.5 H17 A1.5 1.5 0 0 0 18.5 19 V8.5 Z",
+      "M13.5 3.5 V8.5 H18.5",
+      "M12 11.5 V16.5",
+      "M9.5 14 H14.5",
+    ],
+  },
+  trash: {
+    box: 24,
+    strokes: [
+      "M4.5 6.5 H19.5",
+      "M9.5 6.5 V4.5 A1 1 0 0 1 10.5 3.5 H13.5 A1 1 0 0 1 14.5 4.5 V6.5",
+      "M6.5 6.5 L7.4 19.6 A1.5 1.5 0 0 0 8.9 21 H15.1 A1.5 1.5 0 0 0 16.6 19.6 L17.5 6.5",
+      "M10.5 10.5 V17",
+      "M13.5 10.5 V17",
+    ],
+  },
+  checklist: {
+    box: 24,
+    strokes: [
+      "M3.5 6.5 L5 8 L7.5 5.5",
+      "M3.5 13 L5 14.5 L7.5 12",
+      "M3.5 19.5 L5 21 L7.5 18.5",
+      "M10.5 7 H20.5",
+      "M10.5 13.5 H20.5",
+      "M10.5 20 H20.5",
+    ],
+    width: 1.6,
+  },
+  /** A delegated search — work handed to someone else and handed back. */
+  sparkles: {
+    box: 24,
+    strokes: [
+      "M9 3 L10.4 7.6 L15 9 L10.4 10.4 L9 15 L7.6 10.4 L3 9 L7.6 7.6 Z",
+      "M17 13 L17.9 15.6 L20.5 16.5 L17.9 17.4 L17 20 L16.1 17.4 L13.5 16.5 L16.1 15.6 Z",
+    ],
+    width: 1.5,
+  },
+  /** An MCP server — something plugged in from outside. */
+  plug: {
+    box: 24,
+    strokes: [
+      "M9 3.5 V8",
+      "M15 3.5 V8",
+      "M6.5 8 H17.5 V11.5 A5.5 5.5 0 0 1 12 17 A5.5 5.5 0 0 1 6.5 11.5 Z",
+      "M12 17 V20.5",
+    ],
+  },
+  send: {
+    box: 24,
+    strokes: ["M12 19.5 V5", "M6 11 L12 5 L18 11"],
+    width: 1.9,
+  },
+  stopCircle: {
+    box: 24,
+    strokes: ["M9.5 9.5 H14.5 V14.5 H9.5 Z"],
+    circles: [{ cx: 12, cy: 12, r: 9 }],
+  },
+  /** The finished report. */
+  flag: {
+    box: 24,
+    strokes: ["M6 21 V3.5", "M6 4.5 H18.5 L15.5 9.5 L18.5 14.5 H6"],
   },
   gauge: {
     box: 24,

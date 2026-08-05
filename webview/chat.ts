@@ -197,7 +197,11 @@ function renderHead(): void {
   title.title = state.sessionTitle;
   head.append(title);
 
-  const chip = el("span", state.agent === "architect" ? "Architect" : "Build", `mode-chip ${state.agent}`);
+  const chip = el("span", undefined, `mode-chip ${state.agent}`);
+  chip.append(
+    icon(state.agent === "architect" ? "compass" : "hammer", 11),
+    el("span", state.agent === "architect" ? "Architect" : "Build"),
+  );
   head.append(chip);
 
   if (state.activity) {
@@ -225,7 +229,8 @@ function renderHead(): void {
   // conversation is about to be summarised, which nothing else on screen says.
   if (state.usage?.contextUsed !== undefined && state.usage.contextUsed > 0.25) {
     const percent = Math.min(100, Math.round(state.usage.contextUsed * 100));
-    const gauge = el("span", `${percent}% context`, "meter");
+    const gauge = el("span", undefined, "meter");
+    gauge.append(icon("context", 12, "glyph"), el("span", `${percent}%`));
     gauge.title =
       percent >= 65
         ? "The earlier part of this conversation will be summarised to make room."
@@ -236,21 +241,31 @@ function renderHead(): void {
 
   if (state.usage) {
     const total = state.usage.inputTokens + state.usage.outputTokens;
-    const meter = el("span", undefined, "meter");
-    meter.append(el("b", formatTokens(total)), document.createTextNode(" tokens"));
+    const tokens = el("span", undefined, "meter");
+    tokens.title = `${total.toLocaleString()} tokens this build`;
+    tokens.append(icon("layers", 12, "glyph"), el("b", formatTokens(total)));
+    head.append(tokens);
+
     // Money only where there is money: a subscription or a local model shows
     // the token count and nothing else, because the honest cost is zero extra.
     if (state.usage.costUsd !== undefined) {
-      meter.append(document.createTextNode(` · ${formatCost(state.usage.costUsd)}`));
+      const cost = el("span", undefined, "meter");
+      cost.title = "Estimated cost of this build";
+      cost.append(icon("coin", 12, "glyph"), el("b", formatCost(state.usage.costUsd)));
+      head.append(cost);
     }
-    if (state.model) meter.append(document.createTextNode(` · ${state.model}`));
-    head.append(meter);
-  } else if (state.model) {
-    head.append(el("span", state.model, "meter"));
+  }
+  if (state.model) {
+    const model = el("span", state.model, "meter model");
+    model.title = state.providerLabel ? `${state.providerLabel} · ${state.model}` : state.model;
+    head.append(model);
   }
 
   if (state.running) {
-    head.append(button("Stop", "btn ghost", () => vscode.postMessage({ type: "stop" })));
+    const stop = el("button", undefined, "btn stop");
+    stop.append(icon("stopCircle", 13), el("span", "Stop"));
+    stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+    head.append(stop);
   } else {
     head.append(
       iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
@@ -311,7 +326,11 @@ function appendItem(item: ThreadItem): void {
 
     case "tool": {
       const row = el("div", undefined, "tool-line");
-      row.append(el("span", toolVerb(item.name), "verb"), el("span", item.summary, "arg"));
+      row.append(
+        icon(toolIcon(item.name), 12, "glyph"),
+        el("span", toolVerb(item.name), "verb"),
+        el("span", item.summary, "arg"),
+      );
       thread.append(row);
       break;
     }
@@ -346,7 +365,10 @@ function changeCard(item: Extract<ThreadItem, { kind: "change" }>): HTMLElement 
   changeNodes.set(item.id, card);
 
   const header = el("div", undefined, "card-head");
-  header.append(el("span", verbFor(item.change), "verb"));
+  header.append(
+    icon(changeIcon(item.change), 13, `glyph ${item.change}`),
+    el("span", verbFor(item.change), "verb"),
+  );
 
   const path = el("button", item.file, "path");
   path.addEventListener("click", () => vscode.postMessage({ type: "openFile", file: item.file }));
@@ -372,7 +394,11 @@ function changeCard(item: Extract<ThreadItem, { kind: "change" }>): HTMLElement 
 function commandCard(item: Extract<ThreadItem, { kind: "command" }>): HTMLElement {
   const card = el("div", undefined, "card");
   const header = el("div", undefined, "card-head");
-  header.append(el("span", "run", "verb"), el("span", undefined, "spacer"));
+  header.append(
+    icon("terminal", 13, "glyph"),
+    el("span", "run", "verb"),
+    el("span", undefined, "spacer"),
+  );
   card.append(header);
 
   const body = el("div", undefined, "cmd");
@@ -391,7 +417,7 @@ function commandCard(item: Extract<ThreadItem, { kind: "command" }>): HTMLElemen
 function planCard(plan: BuildPlan): HTMLElement {
   const card = el("div", undefined, "card plan");
   const header = el("div", undefined, "card-head");
-  header.append(el("span", "plan", "verb"));
+  header.append(icon("compass", 13, "glyph"), el("span", "plan", "verb"));
   card.append(header);
 
   const body = el("div", undefined, "body");
@@ -438,7 +464,7 @@ function planCard(plan: BuildPlan): HTMLElement {
 function finishedCard(summary: string, followUps: string[]): HTMLElement {
   const card = el("div", undefined, "card done-card");
   const header = el("div", undefined, "card-head");
-  header.append(el("span", "done", "verb"));
+  header.append(icon("flag", 13, "glyph"), el("span", "done", "verb"));
   card.append(header);
 
   const body = el("div", undefined, "body");
@@ -459,7 +485,11 @@ function permissionCard(request: PermissionCard): HTMLElement {
   askNodes.set(request.id, card);
 
   const header = el("div", undefined, "card-head");
-  header.append(el("span", askVerb(request.kind), "verb"), el("span", request.subject, "path"));
+  header.append(
+    icon(askIcon(request.kind), 13, "glyph"),
+    el("span", askVerb(request.kind), "verb"),
+    el("span", request.subject, "path"),
+  );
   if (request.added !== undefined || request.removed !== undefined) {
     header.append(counts(request.added ?? 0, request.removed ?? 0));
   }
@@ -527,8 +557,12 @@ function renderComposer(): void {
   const row = el("div", undefined, "row");
 
   const segmented = el("div", undefined, "segmented");
-  const planButton = el("button", "Plan first", mode === "architect" ? "on" : undefined);
-  const buildButton = el("button", "Build only", mode === "build" ? "on" : undefined);
+  const planButton = el("button", undefined, mode === "architect" ? "on" : undefined);
+  planButton.append(icon("compass", 12), el("span", "Plan first"));
+  planButton.title = "Explore read-only and hand you a plan to approve";
+  const buildButton = el("button", undefined, mode === "build" ? "on" : undefined);
+  buildButton.append(icon("hammer", 12), el("span", "Build only"));
+  buildButton.title = "Skip planning and start writing";
   planButton.addEventListener("click", () => {
     mode = "architect";
     renderComposer();
@@ -551,14 +585,18 @@ function renderComposer(): void {
   toggle.title = "Apply edits without asking. Deletions and commands still ask.";
   row.append(toggle, el("span", undefined, "spacer"));
 
-  row.append(
-    el("span", mode === "architect" ? "Plans first, you approve" : "Starts writing straight away", "hint"),
-  );
-  row.append(
-    state.running
-      ? button("Stop", "btn ghost", () => vscode.postMessage({ type: "stop" }))
-      : button("Send", "btn primary", send),
-  );
+  if (state.running) {
+    const stop = el("button", undefined, "btn stop");
+    stop.append(icon("stopCircle", 13), el("span", "Stop"));
+    stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+    row.append(stop);
+  } else {
+    const sendButton = el("button", undefined, "btn primary send");
+    sendButton.append(el("span", "Send"), icon("send", 13));
+    sendButton.title = "Enter to send, Shift+Enter for a new line";
+    sendButton.addEventListener("click", send);
+    row.append(sendButton);
+  }
 
   inner.append(row);
   composer.append(inner);
@@ -634,6 +672,46 @@ function counts(added: number, removed: number): HTMLElement {
   return wrap;
 }
 
+/**
+ * The glyph for a kind of work.
+ *
+ * A transcript is scanned rather than read — you are hunting for "where did it
+ * start editing" down a column of grey lines, and a shape finds that faster
+ * than a word does.
+ */
+function toolIcon(name: string): IconName {
+  switch (name) {
+    case "read_file":
+      return "file";
+    case "list_dir":
+      return "folder";
+    case "find_relevant":
+      return "layers";
+    case "list_signals":
+      return "gauge";
+    case "search":
+      return "search";
+    case "delegate_search":
+      return "sparkles";
+    case "run_command":
+      return "terminal";
+    case "update_todos":
+      return "checklist";
+    case "edit_file":
+      return "pencil";
+    case "write_file":
+      return "filePlus";
+    case "delete_file":
+      return "trash";
+    case "submit_plan":
+      return "compass";
+    case "finish":
+      return "flag";
+    default:
+      return name.startsWith("mcp__") ? "plug" : "file";
+  }
+}
+
 function toolVerb(name: string): string {
   switch (name) {
     case "read_file":
@@ -659,6 +737,23 @@ function toolVerb(name: string): string {
 
 function verbFor(kind: "edit" | "create" | "delete"): string {
   return kind === "create" ? "new file" : kind === "delete" ? "deleted" : "edit";
+}
+
+function changeIcon(kind: "edit" | "create" | "delete"): IconName {
+  return kind === "create" ? "filePlus" : kind === "delete" ? "trash" : "pencil";
+}
+
+function askIcon(kind: PermissionCard["kind"]): IconName {
+  switch (kind) {
+    case "create":
+      return "filePlus";
+    case "delete":
+      return "trash";
+    case "command":
+      return "terminal";
+    default:
+      return "pencil";
+  }
 }
 
 function askVerb(kind: PermissionCard["kind"]): string {

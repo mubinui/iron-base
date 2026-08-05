@@ -1139,12 +1139,13 @@ body {
   flex: 0 0 auto;
 }
 .chat-head .title { font-weight: 600; font-size: 12.5px; letter-spacing: -0.01em; }
+.chat-head svg { flex: 0 0 auto; }
 .chat-head .spacer { flex: 1; }
 .mode-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
-  padding: 0.15rem 0.5rem;
+  gap: 0.3rem;
+  padding: 0.16rem 0.5rem 0.16rem 0.4rem;
   border-radius: 999px;
   font-size: 10.5px;
   font-weight: 600;
@@ -1152,11 +1153,38 @@ body {
   text-transform: uppercase;
   border: 1px solid var(--hairline-strong);
   color: var(--ink-muted);
+  white-space: nowrap;
 }
 .mode-chip.architect { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-soft); }
 .mode-chip.build { color: var(--good); border-color: color-mix(in srgb, var(--good) 40%, transparent); background: color-mix(in srgb, var(--good) 12%, transparent); }
-.meter { font-size: 11px; color: var(--ink-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Each number wears its own mark, so three figures in a row are three facts
+   rather than three anonymous numbers. */
+.meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .meter b { font-weight: 600; color: var(--ink); }
+.meter .glyph { opacity: 0.65; }
+.meter.model {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  opacity: 0.8;
+}
+.btn.stop {
+  border-color: color-mix(in srgb, var(--sev-critical) 45%, transparent);
+  color: var(--sev-critical);
+}
+.btn.stop:hover { background: color-mix(in srgb, var(--sev-critical) 12%, transparent); }
+.btn.send { gap: var(--space-2); }
 
 /* ---- Todo rail ---- */
 .todos {
@@ -1224,13 +1252,21 @@ body {
 /* ---- Tool trace ---- */
 .tool-line {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-2);
   font-size: 11.5px;
   color: var(--ink-muted);
-  padding: 1px 0;
+  padding: 2px 0;
 }
-.tool-line .verb { color: var(--ink-muted); opacity: 0.8; flex: 0 0 auto; }
+.tool-line .glyph { flex: 0 0 auto; opacity: 0.55; }
+.tool-line:hover .glyph { opacity: 0.9; }
+.tool-line .verb {
+  color: var(--ink-muted);
+  opacity: 0.85;
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  font-size: 11px;
+}
 .tool-line .arg {
   font-family: var(--mono);
   font-size: 11px;
@@ -1265,6 +1301,12 @@ body {
   text-transform: uppercase;
   color: var(--ink-muted);
 }
+/* The mark is the fastest read on a card, so it carries the colour the words
+   would otherwise have to. */
+.card-head .glyph { flex: 0 0 auto; opacity: 0.75; }
+.card-head .glyph.create { color: var(--good); opacity: 1; }
+.card-head .glyph.delete { color: var(--sev-critical); opacity: 1; }
+.card-head .glyph.edit { color: var(--accent); opacity: 1; }
 .counts { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
 .counts .add { color: var(--good); }
 .counts .del { color: var(--sev-critical); }
@@ -1387,8 +1429,19 @@ body {
 .composer .row { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .composer .row .spacer { flex: 1; }
 .segmented { display: inline-flex; border: 1px solid var(--hairline-strong); border-radius: var(--radius-sm); overflow: hidden; }
-.segmented button { padding: 0.28rem 0.7rem; font-size: 11.5px; color: var(--ink-muted); border-radius: 0; border: none; }
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  border-radius: 0;
+  border: none;
+}
+.segmented button:hover { background: var(--surface-raised); color: var(--ink); }
 .segmented button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.segmented button.on:hover { background: var(--accent-soft); }
 .toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 11.5px; color: var(--ink-muted); cursor: pointer; }
 .toggle input { accent-color: var(--accent); }
 .hint { font-size: 10.5px; color: var(--ink-muted); }
