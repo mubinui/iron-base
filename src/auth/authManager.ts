@@ -18,16 +18,21 @@ import { SecretStore } from "./secretStore";
 /** Order used when `ironbase.provider` is "auto". */
 const AUTO_ORDER: ProviderId[] = ["anthropic-oauth", "chatgpt-oauth", "gemini-oauth"];
 
+/** Caches whichever Codex model this ChatGPT account turned out to allow. */
+const CHATGPT_MODEL_KEY = "ironbase.chatgpt.model";
+
 export class AuthManager {
   readonly store: SecretStore;
   readonly anthropic: AnthropicOAuth;
   readonly openai: OpenAiOAuth;
   readonly google: GoogleOAuth;
+  private readonly globalState: vscode.Memento;
 
   private readonly onChangeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChange = this.onChangeEmitter.event;
 
   constructor(context: vscode.ExtensionContext) {
+    this.globalState = context.globalState;
     this.store = new SecretStore(context.secrets);
     this.anthropic = new AnthropicOAuth(this.store);
     this.openai = new OpenAiOAuth(this.store, context.globalState);
@@ -90,12 +95,19 @@ export class AuthManager {
           kind: "oauth",
           getAccessToken: (force) => this.anthropic.getAccessToken(force),
         });
-      case "chatgpt-oauth":
+      case "chatgpt-oauth": {
+        // A previously negotiated model is tried first, so the ladder is walked
+        // once per account rather than on every run.
+        const pinned = modelOverride.length > 0;
+        const remembered = this.globalState.get<string>(CHATGPT_MODEL_KEY);
         return new CodexClient(
-          model,
+          pinned ? model : (remembered ?? model),
           (force) => this.openai.getAccessToken(force),
           () => this.openai.getAccountId(),
+          pinned,
+          (winner) => void this.globalState.update(CHATGPT_MODEL_KEY, winner),
         );
+      }
       case "gemini-oauth":
         return new GeminiClient(id, model, {
           kind: "oauth",

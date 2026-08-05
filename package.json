@@ -2,7 +2,7 @@
   "name": "ironbase",
   "displayName": "IronBase — Architecture Review",
   "description": "AI-powered architecture review and scalability analysis. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {
@@ -125,7 +125,12 @@
       "properties": {
         "ironbase.provider": {
           "type": "string",
-          "enum": ["auto", "anthropic-oauth", "chatgpt-oauth", "gemini-oauth"],
+          "enum": [
+            "auto",
+            "anthropic-oauth",
+            "chatgpt-oauth",
+            "gemini-oauth"
+          ],
           "enumDescriptions": [
             "Use the first connected account",
             "Claude (Pro or Max subscription)",
@@ -195,7 +200,11 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["anthropic-oauth", "chatgpt-oauth", "gemini-oauth"]
+            "enum": [
+              "anthropic-oauth",
+              "chatgpt-oauth",
+              "gemini-oauth"
+            ]
           },
           "default": [],
           "description": "Accounts to hide (kill-switch, e.g. if a sign-in flow breaks upstream)."
