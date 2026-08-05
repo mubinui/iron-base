@@ -149,10 +149,18 @@ async function startRun(mode: RunMode): Promise<void> {
   const client = await auth.getActiveClient();
   if (!client) {
     sidebar.reveal();
-    const choice = await vscode.window.showWarningMessage(
-      "Connect an AI account and IronBase will use it to review your code.",
-      "Connect an account",
-    );
+    // "Nothing is connected" and "the provider you pinned has no credential"
+    // are different problems with different fixes, and saying the first when
+    // the second is true sends people to edit settings that were already
+    // correct — the key never lived there.
+    const pinned = getConfig().provider;
+    const message =
+      pinned !== "auto" && !(await auth.hasCredential(pinned))
+        ? `Settings point at ${PROVIDER_LABELS[pinned]}, but no ${PROVIDER_LABELS[pinned]} credential is stored. ` +
+          "API keys are kept in your system keychain, not in settings.json — connect the account to add one."
+        : "Connect an AI account and IronBase will use it to review your code.";
+
+    const choice = await vscode.window.showWarningMessage(message, "Connect an account");
     if (choice === "Connect an account") await connectAccount();
     return;
   }

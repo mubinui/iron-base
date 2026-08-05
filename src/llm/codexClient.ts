@@ -396,17 +396,24 @@ function buildEntitlementError(
   const detail = rejections[0]?.split(": ").slice(1).join(": ") ?? "";
   const noEntitlement = /ChatGPT account|plan|subscription|entitl/i.test(detail);
 
+  // Entitlement is checked first on purpose. When the account has no Codex
+  // access, *no* model works — so telling a pinned user to "pick Automatic"
+  // sends them round a loop that walks the same ladder and fails again. That
+  // advice only helps when other models would have worked.
+  if (noEntitlement) {
+    return (
+      `Your ChatGPT plan does not include Codex, which is the only thing a ChatGPT login can reach. ` +
+      `The backend said: ${detail}\n\n` +
+      `No model will work here — changing the model setting cannot fix it, because the account lacks the entitlement rather than the model being wrong. ` +
+      `Codex needs an active ChatGPT Plus, Pro, Business, or Edu plan.\n\n` +
+      `Free alternatives that work properly: Ollama (local), Groq, Gemini, Kimi, or Mistral. ` +
+      `Run "IronBase: Connect an Account…" to pick one.`
+    );
+  }
   if (pinned) {
     return (
       `Your ChatGPT account cannot use "${tried[0]}". The backend said: ${detail}\n\n` +
       `Run "IronBase: Choose Model…" and pick Automatic to let IronBase ask your account which models it may use.`
-    );
-  }
-  if (noEntitlement) {
-    return (
-      `Your ChatGPT plan does not include Codex model access, which is what IronBase reviews with. ` +
-      `The backend said: ${detail}\n\n` +
-      `Codex needs an active ChatGPT Plus, Pro, Business, or Edu plan. If yours is active, sign out and back in to refresh the entitlement — or connect a Claude or Gemini account instead, which works the same way.`
     );
   }
   return (
