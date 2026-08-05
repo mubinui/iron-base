@@ -2,7 +2,7 @@
   "name": "ironbase",
   "displayName": "IronBase — Architecture Review",
   "description": "AI architecture review with a dependency map, verified one-click code fixes, and a modernization blueprint. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {
@@ -86,6 +86,11 @@
         "category": "IronBase"
       },
       {
+        "command": "ironbase.signOutProvider",
+        "title": "Disconnect an Account…",
+        "category": "IronBase"
+      },
+      {
         "command": "ironbase.signOut",
         "title": "Sign Out / Clear Credentials",
         "category": "IronBase"
@@ -143,7 +148,13 @@
             "auto",
             "anthropic-oauth",
             "chatgpt-oauth",
+            "chatgpt-web",
             "gemini-oauth",
+            "openai",
+            "xai",
+            "openrouter",
+            "groq",
+            "mistral",
             "kimi",
             "deepseek",
             "ollama"
@@ -151,8 +162,14 @@
           "enumDescriptions": [
             "Use the first connected account",
             "Claude (Pro or Max subscription)",
-            "ChatGPT (Plus or Pro subscription)",
+            "ChatGPT (Plus or Pro subscription with Codex access)",
+            "ChatGPT web endpoint (free account; experimental, against OpenAI terms)",
             "Gemini (Google account, free tier included)",
+            "OpenAI platform API key (billed separately from ChatGPT)",
+            "Grok (xAI API key)",
+            "OpenRouter (one key, most models)",
+            "Groq (free API key, very fast)",
+            "Mistral (API key, free tier included)",
             "Kimi (Moonshot API key, free tier included)",
             "DeepSeek (API key, pay as you go)",
             "Ollama (models on this machine, no account)"
@@ -223,7 +240,13 @@
             "enum": [
               "anthropic-oauth",
               "chatgpt-oauth",
+              "chatgpt-web",
               "gemini-oauth",
+              "openai",
+              "xai",
+              "openrouter",
+              "groq",
+              "mistral",
               "kimi",
               "deepseek",
               "ollama"

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { getConfig } from "../config";
 import { AnthropicClient } from "../llm/anthropicClient";
+import { ChatGptWebClient } from "../llm/chatgptWebClient";
 import { CodexClient } from "../llm/codexClient";
 import { GeminiClient } from "../llm/geminiClient";
 import {
@@ -13,24 +14,30 @@ import {
   OPENAI_COMPATIBLE_BASES,
   PROVIDER_CREDENTIALS,
   PROVIDER_LABELS,
+  isOpenAiCompatible,
   type LlmClient,
+  type OpenAiCompatibleProvider,
   type ProviderId,
 } from "../llm/types";
 import { log } from "../util/log";
 import { AnthropicOAuth } from "./anthropicOAuth";
 import { GoogleOAuth } from "./googleOAuth";
 import { OpenAiOAuth } from "./openaiOAuth";
-import { SecretStore } from "./secretStore";
+import { SecretStore, type SecretKey } from "./secretStore";
+
+/** Providers that authenticate with a pasted key. */
+export type ApiKeyProvider = Exclude<
+  ProviderId,
+  "anthropic-oauth" | "chatgpt-oauth" | "gemini-oauth" | "ollama"
+>;
+
+/** The keychain entry holding one provider's API key. */
+function secretKeyFor(id: ApiKeyProvider): SecretKey {
+  return `${id}Key` as SecretKey;
+}
 
 /** Order used when `ironbase.provider` is "auto". */
-const AUTO_ORDER: ProviderId[] = [
-  "anthropic-oauth",
-  "chatgpt-oauth",
-  "gemini-oauth",
-  "kimi",
-  "deepseek",
-  "ollama",
-];
+const AUTO_ORDER: ProviderId[] = [...ALL_PROVIDERS];
 
 /** Caches whichever Codex model this ChatGPT account turned out to allow. */
 const CHATGPT_MODEL_KEY = "ironbase.chatgpt.model";
@@ -80,27 +87,24 @@ export class AuthManager {
         return this.openai.isSignedIn();
       case "gemini-oauth":
         return this.google.isSignedIn();
-      case "kimi":
-        return (await this.store.getString("kimiKey")) !== undefined;
-      case "deepseek":
-        return (await this.store.getString("deepseekKey")) !== undefined;
       case "ollama":
         // A local server counts as connected only while it is actually running,
         // otherwise every run would start by failing to reach it.
         return this.isOllamaRunning();
+      default:
+        return (await this.apiKeyFor(id)) !== undefined;
     }
   }
 
-  /** Stores an API key and makes that provider active. */
-  async setApiKey(id: "kimi" | "deepseek", key: string): Promise<void> {
-    await this.store.setString(id === "kimi" ? "kimiKey" : "deepseekKey", key.trim());
+  /** Stores an API key for any key-based provider. */
+  async setApiKey(id: ApiKeyProvider, key: string): Promise<void> {
+    await this.store.setString(secretKeyFor(id), key.trim());
     log.info(`Stored the ${PROVIDER_LABELS[id]} API key.`);
   }
 
   private async apiKeyFor(id: ProviderId): Promise<string | undefined> {
-    if (id === "kimi") return this.store.getString("kimiKey");
-    if (id === "deepseek") return this.store.getString("deepseekKey");
-    return undefined;
+    if (PROVIDER_CREDENTIALS[id] !== "apiKey") return undefined;
+    return this.store.getString(secretKeyFor(id as ApiKeyProvider));
   }
 
   private async isOllamaRunning(): Promise<boolean> {
@@ -122,13 +126,35 @@ export class AuthManager {
     if (config.provider !== "auto") {
       if (this.isDisabled(config.provider)) return undefined;
       if (!(await this.hasCredential(config.provider))) return undefined;
-      return this.build(config.provider, this.modelFor(config.provider, config.model));
+      return this.build(
+        config.provider,
+        await this.resolveModel(config.provider, this.modelFor(config.provider, config.model)),
+      );
     }
     for (const id of AUTO_ORDER) {
       if (this.isDisabled(id)) continue;
-      if (await this.hasCredential(id)) return this.build(id, this.modelFor(id, config.model));
+      if (await this.hasCredential(id)) {
+        return this.build(id, await this.resolveModel(id, this.modelFor(id, config.model)));
+      }
     }
     return undefined;
+  }
+
+  /**
+   * Last check before a model id goes over the wire.
+   *
+   * Only Ollama needs it: its catalogue is whatever the user happened to pull,
+   * so a default that ships with the extension is a 404 more often than not.
+   * Asking the local server costs nothing and turns "model not found" into a
+   * review that runs.
+   */
+  private async resolveModel(id: ProviderId, model: string): Promise<string> {
+    if (id !== "ollama") return model;
+    const installed = await this.listModels("ollama");
+    if (installed.length === 0 || installed.includes(model)) return model;
+    const substitute = preferredLocalModel(installed);
+    log.warn(`Ollama has no "${model}"; using "${substitute}" instead.`);
+    return substitute;
   }
 
   /**
@@ -152,8 +178,8 @@ export class AuthManager {
 
   /** The models this provider can actually offer right now. */
   async listModels(id: ProviderId): Promise<string[]> {
-    if (PROVIDER_CREDENTIALS[id] !== "apiKey" && id !== "ollama") return [];
-    const base = id === "ollama" ? getConfig().ollamaBaseUrl : OPENAI_COMPATIBLE_BASES[id as "kimi" | "deepseek"];
+    if (!isOpenAiCompatible(id)) return [];
+    const base = id === "ollama" ? getConfig().ollamaBaseUrl : OPENAI_COMPATIBLE_BASES[id];
     try {
       return await listOpenAiCompatibleModels(base, await this.apiKeyFor(id));
     } catch (err) {
@@ -223,18 +249,23 @@ export class AuthManager {
           getAccessToken: (force) => this.google.getAccessToken(force),
           getProjectId: () => this.google.getProjectId(),
         });
-      case "kimi":
-      case "deepseek":
-        return new OpenAiCompatibleClient(id, model, {
-          baseUrl: OPENAI_COMPATIBLE_BASES[id],
-          label: PROVIDER_LABELS[id],
-          getApiKey: () => this.apiKeyFor(id),
+      case "chatgpt-web":
+        return new ChatGptWebClient(id, model, {
+          getAccessToken: () => this.apiKeyFor(id),
         });
       case "ollama":
         return new OpenAiCompatibleClient(id, model, {
           baseUrl: config.ollamaBaseUrl,
           label: PROVIDER_LABELS[id],
           maxTokensCap: 8000,
+        });
+      default:
+        // Every remaining backend speaks the OpenAI dialect, so adding one is a
+        // row in OPENAI_COMPATIBLE_BASES rather than a new case here.
+        return new OpenAiCompatibleClient(id, model, {
+          baseUrl: OPENAI_COMPATIBLE_BASES[id as OpenAiCompatibleProvider],
+          label: PROVIDER_LABELS[id],
+          getApiKey: () => this.apiKeyFor(id),
         });
     }
   }
@@ -250,14 +281,11 @@ export class AuthManager {
       case "gemini-oauth":
         await this.google.signOut();
         break;
-      case "kimi":
-        await this.store.clear("kimiKey");
-        break;
-      case "deepseek":
-        await this.store.clear("deepseekKey");
-        break;
       case "ollama":
         // Nothing is stored for a local server.
+        break;
+      default:
+        await this.store.clear(secretKeyFor(id as ApiKeyProvider));
         break;
     }
   }
@@ -267,4 +295,10 @@ export class AuthManager {
     await this.openai.signOut();
     await this.store.clearAll();
   }
+}
+
+/** Prefers a coding-tuned local model, then the largest-looking one. */
+function preferredLocalModel(installed: string[]): string {
+  const coder = installed.find((m) => /coder|code/i.test(m));
+  return coder ?? installed[0];
 }

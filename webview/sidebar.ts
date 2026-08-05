@@ -211,7 +211,12 @@ function connected(state: SidebarState): HTMLElement[] {
     out.push(linkButton("Connect another account", "signIn", CONNECT));
   }
   out.push(linkButton("Rebuild project index", "refresh", "ironbase.clearIndex"));
-  out.push(linkButton("Sign out", "signOut", "ironbase.signOut"));
+  // Disconnecting one account is the common case; wiping every credential is
+  // the rare one, so it goes second.
+  if (connectedIds.size > 1) {
+    out.push(linkButton("Disconnect an account", "signOut", "ironbase.signOutProvider"));
+  }
+  out.push(linkButton("Sign out of everything", "signOut", "ironbase.signOut"));
   return out;
 }
 

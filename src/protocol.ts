@@ -33,6 +33,7 @@ export const ALLOWED_COMMANDS = [
   "ironbase.signInGoogle",
   "ironbase.chooseModel",
   "ironbase.clearIndex",
+  "ironbase.signOutProvider",
   "ironbase.signOut",
 ] as const;
 

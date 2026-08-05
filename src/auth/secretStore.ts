@@ -12,6 +12,15 @@ const KEYS = {
   anthropicOAuth: "ironbase.auth.anthropic",
   openaiOAuth: "ironbase.auth.openai",
   googleOAuth: "ironbase.auth.google",
+  // One entry per API-key provider. Named after the provider id so the auth
+  // manager can derive the key rather than carry a switch that has to be
+  // updated every time a backend is added.
+  "chatgpt-webKey": "ironbase.auth.key.chatgptweb",
+  openaiKey: "ironbase.auth.key.openai",
+  xaiKey: "ironbase.auth.key.xai",
+  openrouterKey: "ironbase.auth.key.openrouter",
+  groqKey: "ironbase.auth.key.groq",
+  mistralKey: "ironbase.auth.key.mistral",
   kimiKey: "ironbase.auth.kimi",
   deepseekKey: "ironbase.auth.deepseek",
 } as const;

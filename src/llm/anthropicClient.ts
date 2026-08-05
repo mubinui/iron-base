@@ -1,6 +1,9 @@
 import { abortSignalFor, readSse, throwHttpError } from "./sse";
+import { log } from "../util/log";
+import { isEffortRejection, supportsEffort } from "./effort";
 import {
   LlmCancelledError,
+  LlmHttpError,
   type CancelToken,
   type ChatRequest,
   type ChatTurn,
@@ -51,9 +54,21 @@ export class AnthropicClient implements LlmClient {
       if (this.auth.kind === "oauth" && isUnauthorized(err)) {
         return await this.send(req, onEvent, token, true);
       }
+      // `effort` is only accepted by some models, and the account can be
+      // entitled to one this build has never heard of — the user can type any
+      // id. Rather than fail the whole review over an optional tuning knob,
+      // drop it and go again.
+      if (err instanceof LlmHttpError && isEffortRejection(err.status, err.body)) {
+        log.warn(`${this.model} does not accept the effort parameter; retrying without it.`);
+        this.effortRejected = true;
+        return await this.send(req, onEvent, token, false);
+      }
       throw err;
     }
   }
+
+  /** Set once a model has told us it will not take `output_config`. */
+  private effortRejected = false;
 
   private async send(
     req: ChatRequest,
@@ -94,7 +109,12 @@ export class AnthropicClient implements LlmClient {
         description: t.description,
         input_schema: t.inputSchema,
       })),
-      output_config: { effort: "high" },
+      // Sent only where it is accepted. Haiku 4.5 and the 4.5-and-older Sonnets
+      // reject `effort` outright with a 400, which used to take the whole
+      // review down the moment someone picked a cheaper model.
+      ...(supportsEffort(this.model) && !this.effortRejected
+        ? { output_config: { effort: "high" } }
+        : {}),
       stream: true,
     };
 

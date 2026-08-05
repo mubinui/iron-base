@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { AuthManager } from "./auth/authManager";
+import { AuthManager, type ApiKeyProvider } from "./auth/authManager";
 import { getConfig, getGoogleClient } from "./config";
 import { runAnalysis, type ProgressEvent } from "./engine/agentLoop";
 import type { AnalysisReport } from "./engine/findings";
@@ -64,6 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("ironbase.signInOpenAi", signInOpenAi),
     register("ironbase.chooseModel", chooseModel),
     register("ironbase.clearIndex", clearIndex),
+    register("ironbase.signOutProvider", signOutProvider),
     register("ironbase.signOut", signOut),
     register("ironbase.cancel", cancelRun),
     register("ironbase.exportReport", doExport),
@@ -363,7 +364,8 @@ async function connectAccount(): Promise<void> {
       else await signInGoogle();
       return;
     case "apiKey":
-      await signInWithApiKey(picked.id as "kimi" | "deepseek");
+      if (picked.id === "chatgpt-web") await connectChatGptWeb();
+      else await signInWithApiKey(picked.id as ApiKeyProvider);
       return;
     case "local":
       await connectOllama();
@@ -372,7 +374,7 @@ async function connectAccount(): Promise<void> {
 }
 
 /** Takes a key, checks it is plausible, and stores it in the keychain. */
-async function signInWithApiKey(id: "kimi" | "deepseek"): Promise<void> {
+async function signInWithApiKey(id: ApiKeyProvider): Promise<void> {
   const label = PROVIDER_LABELS[id];
   const signup = PROVIDER_SIGNUP[id];
 
@@ -409,6 +411,59 @@ async function signInWithApiKey(id: "kimi" | "deepseek"): Promise<void> {
   await pinProvider(id);
   await refreshAuthState();
   void vscode.window.showInformationMessage(`IronBase is connected to ${label}.`);
+}
+
+/**
+ * Connects a plain ChatGPT account by pasting the browser session token.
+ *
+ * Gated behind an explicit acknowledgement rather than a quiet paste box. The
+ * cost of this provider does not land on IronBase — it lands on the account,
+ * and the person pasting the token is the one who carries it, so they get to
+ * read what they are agreeing to first.
+ */
+async function connectChatGptWeb(): Promise<void> {
+  const proceed = await vscode.window.showWarningMessage(
+    "ChatGPT (web) drives your account through the undocumented endpoint the chatgpt.com page uses.",
+    {
+      modal: true,
+      detail:
+        "This works with a free account, and it is experimental:\n\n" +
+        "• Automated use of ChatGPT is against OpenAI's terms — your account could be suspended.\n" +
+        "• The endpoint is undocumented and breaks without warning.\n" +
+        "• It has no real tool calling, so reviews are less reliable than any other provider.\n" +
+        "• If OpenAI's anti-automation check is active, IronBase will not work around it.\n\n" +
+        "Ollama, Groq, Gemini, Kimi and Mistral all have free options that work properly.",
+    },
+    "I understand — connect anyway",
+  );
+  if (proceed !== "I understand — connect anyway") return;
+
+  const token = await vscode.window.showInputBox({
+    title: "ChatGPT (web) session token",
+    prompt:
+      "Sign in at chatgpt.com, open https://chatgpt.com/api/auth/session, and paste the accessToken value.",
+    placeHolder: "eyJhbGciOi…",
+    ignoreFocusOut: true,
+    password: true,
+    validateInput: (value) => {
+      const trimmed = value.trim();
+      if (trimmed.length === 0) return "Paste the accessToken, or press Escape to cancel.";
+      // Session tokens are JWTs. Catching the wrong paste here beats a 401 on
+      // the first review, since the token is invisible once stored.
+      if (!/^ey[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\./.test(trimmed)) {
+        return "That does not look like an accessToken — it should be a long value starting with \"ey\".";
+      }
+      return undefined;
+    },
+  });
+  if (!token) return;
+
+  await auth.setApiKey("chatgpt-web", token);
+  await pinProvider("chatgpt-web");
+  await refreshAuthState();
+  void vscode.window.showInformationMessage(
+    "Connected to ChatGPT (web). The token expires after a few hours — reconnect when reviews start failing with a rejected session.",
+  );
 }
 
 /** Confirms a local server is actually up before calling it connected. */
@@ -531,6 +586,13 @@ interface ModelPick extends vscode.QuickPickItem {
 const CUSTOM_MODEL = "\0custom";
 
 /**
+ * How many live-fetched models to append per provider. OpenRouter alone lists
+ * hundreds; a picker that long is not a picker, and the type-your-own row
+ * covers whatever falls off the end.
+ */
+const MAX_LISTED_MODELS = 40;
+
+/**
  * Offers the models of every connected account. A model id belongs to exactly
  * one provider, so choosing one pins the provider as well — otherwise a Claude
  * id could be sent to ChatGPT the next time "auto" resolved differently.
@@ -578,6 +640,23 @@ async function chooseModel(): Promise<void> {
         detail: choice.id,
         provider: id,
         model: choice.id,
+      });
+    }
+
+    // Ask the provider what it actually offers. A curated list goes stale the
+    // moment a vendor ships a model, and for OpenRouter or a local Ollama the
+    // catalogue is specific to the account or machine — nothing shipped in this
+    // build could know it.
+    const listed = await auth.listModels(id);
+    const known = new Set(MODEL_CHOICES[id].map((c) => c.id));
+    const extra = listed.filter((model) => !known.has(model)).slice(0, MAX_LISTED_MODELS);
+    for (const model of extra) {
+      items.push({
+        label: model,
+        description: isCurrent(id, model) ? "available · current" : "available",
+        detail: model,
+        provider: id,
+        model,
       });
     }
     // Providers rename model ids without notice, and an account is sometimes
@@ -635,6 +714,48 @@ async function clearIndex(): Promise<void> {
   await indexStore.clear(folder.uri);
   void vscode.window.showInformationMessage(
     "Project index cleared. The next review will rebuild it from scratch.",
+  );
+}
+
+/**
+ * Disconnects one account, leaving the others alone.
+ *
+ * The all-or-nothing sign-out is still there for clearing the machine, but it
+ * is the wrong tool for "this key is wrong" or "stop using my work account" —
+ * which previously meant signing out of everything and reconnecting each one.
+ */
+async function signOutProvider(): Promise<void> {
+  const connected = await auth.availableProviders();
+  if (connected.length === 0) {
+    void vscode.window.showInformationMessage("No accounts are connected.");
+    return;
+  }
+
+  interface Pick extends vscode.QuickPickItem {
+    id: ProviderId;
+  }
+  const picked = await vscode.window.showQuickPick<Pick>(
+    connected.map((id) => ({
+      id,
+      label: PROVIDER_LABELS[id],
+      detail: PROVIDER_DETAILS[id],
+    })),
+    { title: "IronBase: Disconnect an account", placeHolder: "Choose the account to sign out of" },
+  );
+  if (!picked) return;
+
+  await auth.signOut(picked.id);
+
+  // Leaving the setting pinned to a provider with no credential would make the
+  // next review fail with "nothing connected" instead of using what is left.
+  if (getConfig().provider === picked.id) {
+    const settings = vscode.workspace.getConfiguration("ironbase");
+    await settings.update("provider", "auto", vscode.ConfigurationTarget.Global);
+    await settings.update("model", "", vscode.ConfigurationTarget.Global);
+  }
+  await refreshAuthState();
+  void vscode.window.showInformationMessage(
+    `Disconnected ${PROVIDER_LABELS[picked.id]}.`,
   );
 }
 
@@ -758,7 +879,8 @@ async function reportError(err: unknown): Promise<void> {
       );
       if (choice === "Sign in again" || choice === "Enter a new key") {
         if (active === undefined) await connectAccount();
-        else if (isKey) await signInWithApiKey(active.id as "kimi" | "deepseek");
+        else if (active.id === "chatgpt-web") await connectChatGptWeb();
+        else if (isKey) await signInWithApiKey(active.id as ApiKeyProvider);
         else if (active.id === "chatgpt-oauth") await signInOpenAi();
         else if (active.id === "gemini-oauth") await signInGoogle();
         else if (active.id === "anthropic-oauth") await signInAnthropic();

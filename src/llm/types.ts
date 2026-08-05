@@ -14,7 +14,13 @@
 export type ProviderId =
   | "anthropic-oauth"
   | "chatgpt-oauth"
+  | "chatgpt-web"
   | "gemini-oauth"
+  | "openai"
+  | "xai"
+  | "openrouter"
+  | "groq"
+  | "mistral"
   | "kimi"
   | "deepseek"
   | "ollama";
@@ -22,7 +28,13 @@ export type ProviderId =
 export const ALL_PROVIDERS: ProviderId[] = [
   "anthropic-oauth",
   "chatgpt-oauth",
+  "chatgpt-web",
   "gemini-oauth",
+  "openai",
+  "xai",
+  "openrouter",
+  "groq",
+  "mistral",
   "kimi",
   "deepseek",
   "ollama",
@@ -34,7 +46,13 @@ export type CredentialKind = "oauth" | "apiKey" | "local";
 export const PROVIDER_CREDENTIALS: Record<ProviderId, CredentialKind> = {
   "anthropic-oauth": "oauth",
   "chatgpt-oauth": "oauth",
+  "chatgpt-web": "apiKey",
   "gemini-oauth": "oauth",
+  openai: "apiKey",
+  xai: "apiKey",
+  openrouter: "apiKey",
+  groq: "apiKey",
+  mistral: "apiKey",
   kimi: "apiKey",
   deepseek: "apiKey",
   ollama: "local",
@@ -43,7 +61,13 @@ export const PROVIDER_CREDENTIALS: Record<ProviderId, CredentialKind> = {
 export const PROVIDER_LABELS: Record<ProviderId, string> = {
   "anthropic-oauth": "Claude",
   "chatgpt-oauth": "ChatGPT",
+  "chatgpt-web": "ChatGPT (web)",
   "gemini-oauth": "Gemini",
+  openai: "OpenAI",
+  xai: "Grok",
+  openrouter: "OpenRouter",
+  groq: "Groq",
+  mistral: "Mistral",
   kimi: "Kimi",
   deepseek: "DeepSeek",
   ollama: "Ollama",
@@ -56,8 +80,16 @@ export const PROVIDER_LABELS: Record<ProviderId, string> = {
  */
 export const PROVIDER_DETAILS: Record<ProviderId, string> = {
   "anthropic-oauth": "Pro or Max subscription",
-  "chatgpt-oauth": "Plus or Pro subscription",
+  // Codex access is an entitlement of the plan, not of every ChatGPT account —
+  // saying so here saves a failed run and a confusing error.
+  "chatgpt-oauth": "Plus or Pro subscription with Codex access",
+  "chatgpt-web": "Free account \u2014 experimental, against OpenAI\u2019s terms",
   "gemini-oauth": "Google account, free tier included",
+  openai: "Platform API key — billed separately from ChatGPT",
+  xai: "xAI API key, for Grok",
+  openrouter: "One key, most models — Grok, Llama, Qwen, Claude",
+  groq: "Free API key, very fast inference",
+  mistral: "Mistral API key, free tier included",
   kimi: "Moonshot API key, free tier included",
   deepseek: "API key, pay as you go",
   ollama: "Models on this machine, no account",
@@ -65,6 +97,11 @@ export const PROVIDER_DETAILS: Record<ProviderId, string> = {
 
 /** Where to get a key, shown when a provider needs one. */
 export const PROVIDER_SIGNUP: Partial<Record<ProviderId, string>> = {
+  openai: "https://platform.openai.com/api-keys",
+  xai: "https://console.x.ai",
+  openrouter: "https://openrouter.ai/keys",
+  groq: "https://console.groq.com/keys",
+  mistral: "https://console.mistral.ai/api-keys",
   kimi: "https://platform.moonshot.ai/console/api-keys",
   deepseek: "https://platform.deepseek.com/api_keys",
   ollama: "https://ollama.com/download",
@@ -74,8 +111,16 @@ export const DEFAULT_MODELS: Record<ProviderId, string> = {
   "anthropic-oauth": "claude-opus-5",
   "chatgpt-oauth": "gpt-5.1-codex",
   "gemini-oauth": "gemini-2.5-pro",
+  "chatgpt-web": "auto",
+  openai: "gpt-5.1",
+  xai: "grok-4",
+  openrouter: "x-ai/grok-4",
+  groq: "llama-3.3-70b-versatile",
+  mistral: "mistral-large-latest",
   kimi: "kimi-k2-thinking",
   deepseek: "deepseek-reasoner",
+  // Only a starting point — whatever is actually pulled locally wins, because
+  // asking for a model that is not installed is a 404 rather than a fallback.
   ollama: "qwen3-coder:30b",
 };
 
@@ -83,11 +128,31 @@ export const DEFAULT_MODELS: Record<ProviderId, string> = {
  * Base URLs for the providers that speak the OpenAI chat-completions dialect.
  * Ollama's is overridable because people move it off the default port.
  */
-export const OPENAI_COMPATIBLE_BASES: Record<"kimi" | "deepseek" | "ollama", string> = {
+export type OpenAiCompatibleProvider =
+  | "openai"
+  | "xai"
+  | "openrouter"
+  | "groq"
+  | "mistral"
+  | "kimi"
+  | "deepseek"
+  | "ollama";
+
+export const OPENAI_COMPATIBLE_BASES: Record<OpenAiCompatibleProvider, string> = {
+  openai: "https://api.openai.com/v1",
+  xai: "https://api.x.ai/v1",
+  openrouter: "https://openrouter.ai/api/v1",
+  groq: "https://api.groq.com/openai/v1",
+  mistral: "https://api.mistral.ai/v1",
   kimi: "https://api.moonshot.ai/v1",
   deepseek: "https://api.deepseek.com/v1",
   ollama: "http://127.0.0.1:11434/v1",
 };
+
+/** True for providers reached over the OpenAI chat-completions dialect. */
+export function isOpenAiCompatible(id: ProviderId): id is OpenAiCompatibleProvider {
+  return id in OPENAI_COMPATIBLE_BASES;
+}
 
 export interface ModelChoice {
   id: string;
@@ -114,9 +179,42 @@ export const MODEL_CHOICES: Record<ProviderId, ModelChoice[]> = {
     { id: "gpt-5-codex", label: "GPT-5 Codex", note: "Previous Codex" },
     { id: "gpt-5.1", label: "GPT-5.1", note: "General" },
   ],
+  // The web endpoint picks the model from the account's own entitlement, so
+  // there is nothing meaningful to choose between.
+  "chatgpt-web": [{ id: "auto", label: "Whatever the account allows", note: "Not selectable" }],
   "gemini-oauth": [
     { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "Most capable" },
     { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "Faster, higher quota" },
+  ],
+  // The OpenAI platform API, which is billed per token and is entirely separate
+  // from a ChatGPT subscription — unlike the Codex path, it has no entitlement
+  // to negotiate, so any model the key can reach simply works.
+  openai: [
+    { id: "gpt-5.2", label: "GPT-5.2", note: "Most capable" },
+    { id: "gpt-5.1", label: "GPT-5.1", note: "Previous flagship" },
+    { id: "gpt-5.1-codex", label: "GPT-5.1 Codex", note: "Coding-tuned" },
+    { id: "gpt-5-mini", label: "GPT-5 Mini", note: "Cheapest" },
+  ],
+  xai: [
+    { id: "grok-4", label: "Grok 4", note: "Most capable" },
+    { id: "grok-4-fast", label: "Grok 4 Fast", note: "Faster, cheaper" },
+    { id: "grok-code-fast-1", label: "Grok Code Fast", note: "Coding-tuned" },
+  ],
+  // One key, many vendors — the pragmatic way to reach a model this build does
+  // not list. Ids are `vendor/model`, and the picker fetches the live catalogue.
+  openrouter: [
+    { id: "x-ai/grok-4", label: "Grok 4", note: "via OpenRouter" },
+    { id: "anthropic/claude-opus-4.5", label: "Claude Opus 4.5", note: "via OpenRouter" },
+    { id: "qwen/qwen3-coder", label: "Qwen3 Coder", note: "Coding-tuned" },
+    { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B", note: "Open weights" },
+  ],
+  groq: [
+    { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B", note: "Fast" },
+    { id: "qwen-2.5-coder-32b", label: "Qwen2.5 Coder 32B", note: "Coding-tuned" },
+  ],
+  mistral: [
+    { id: "mistral-large-latest", label: "Mistral Large", note: "Most capable" },
+    { id: "codestral-latest", label: "Codestral", note: "Coding-tuned" },
   ],
   kimi: [
     { id: "kimi-k2-thinking", label: "Kimi K2 Thinking", note: "Most capable" },
