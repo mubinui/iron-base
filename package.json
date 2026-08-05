@@ -2,7 +2,7 @@
   "name": "ironbase",
   "displayName": "IronBase — Architecture Review",
   "description": "AI-powered architecture review and scalability analysis. Runs on the Claude, ChatGPT, or Gemini account you already have — no API key required.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {
@@ -64,6 +64,11 @@
       {
         "command": "ironbase.signInGoogle",
         "title": "Connect Gemini Account",
+        "category": "IronBase"
+      },
+      {
+        "command": "ironbase.chooseModel",
+        "title": "Choose Model…",
         "category": "IronBase"
       },
       {
@@ -143,7 +148,7 @@
         "ironbase.model": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Model override. Empty uses the account default (Claude: `claude-opus-5`, ChatGPT: `gpt-5-codex`, Gemini: `gemini-2.5-pro`)."
+          "markdownDescription": "Model override, pinned to the account in `#ironbase.provider#`. Empty lets the account decide (Claude: `claude-opus-5`, ChatGPT: negotiated, Gemini: `gemini-2.5-pro`). Easiest set from the **IronBase: Choose Model…** command."
         },
         "ironbase.ignoreGlobs": {
           "type": "array",

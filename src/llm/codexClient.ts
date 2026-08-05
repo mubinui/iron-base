@@ -86,7 +86,7 @@ export class CodexClient implements LlmClient {
 
     throw new Error(
       this.modelPinned
-        ? `Your ChatGPT account is not entitled to "${req.model}". Clear the ironbase.model setting to let IronBase pick one automatically.`
+        ? `Your ChatGPT account is not entitled to "${req.model}". Run "IronBase: Choose Model…" and pick Automatic to let IronBase negotiate one.`
         : `Your ChatGPT account is not entitled to any model IronBase knows about (tried ${candidates.join(", ")}). ` +
           `Run \`codex\` to see which models your plan allows, then set that id in the ironbase.model setting. ` +
           `Original response: ${lastUnsupported instanceof Error ? lastUnsupported.message : String(lastUnsupported)}`,

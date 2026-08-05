@@ -30,6 +30,37 @@ export const DEFAULT_MODELS: Record<ProviderId, string> = {
   "gemini-oauth": "gemini-2.5-pro",
 };
 
+export interface ModelChoice {
+  id: string;
+  label: string;
+  note: string;
+}
+
+/**
+ * What the model picker offers per provider. Which of these an account may
+ * actually use is an entitlement question the provider answers at request time,
+ * so "Automatic" stays the default — it negotiates rather than guessing.
+ */
+export const MODEL_CHOICES: Record<ProviderId, ModelChoice[]> = {
+  "anthropic-oauth": [
+    { id: "claude-opus-5", label: "Claude Opus 5", note: "Most capable" },
+    { id: "claude-opus-4-8", label: "Claude Opus 4.8", note: "Previous Opus" },
+    { id: "claude-sonnet-5", label: "Claude Sonnet 5", note: "Faster, cheaper" },
+    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", note: "Fastest" },
+  ],
+  "chatgpt-oauth": [
+    { id: "gpt-5.1-codex", label: "GPT-5.1 Codex", note: "Coding-tuned" },
+    { id: "gpt-5-codex", label: "GPT-5 Codex", note: "Coding-tuned" },
+    { id: "gpt-5.1", label: "GPT-5.1", note: "General" },
+    { id: "gpt-5", label: "GPT-5", note: "Widely available" },
+    { id: "codex-mini-latest", label: "Codex Mini", note: "Cheapest" },
+  ],
+  "gemini-oauth": [
+    { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", note: "Most capable" },
+    { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", note: "Faster, higher quota" },
+  ],
+};
+
 export interface JsonSchemaObject {
   type: "object";
   properties: Record<string, unknown>;

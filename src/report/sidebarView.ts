@@ -326,6 +326,15 @@ function fmtTokens(n) {
   return (n / 1000000).toFixed(1) + "M";
 }
 
+// "Automatic" is worth saying: the model shown is only what this account
+// resolved to, not a choice that will hold if the provider changes it.
+function describeAccount(state) {
+  if (!state.model) return "Connected to " + state.providerLabel + ".";
+  return state.model.automatic
+    ? "Connected to " + state.providerLabel + ", using " + state.model.label + " (automatic)."
+    : "Connected to " + state.providerLabel + ", pinned to " + state.model.label + ".";
+}
+
 function fmtDuration(ms) {
   const s = Math.floor(ms / 1000);
   if (s < 60) return s + "s";
@@ -434,7 +443,8 @@ function render(state) {
   }
 
   nodes.push(el("h2", "Account"));
-  nodes.push(el("p", "Connected to " + state.providerLabel + ".", "muted"));
+  nodes.push(el("p", describeAccount(state), "muted"));
+  nodes.push(button("Change model", "ironbase.chooseModel", "link"));
   nodes.push(button("Connect a different account", "ironbase.signInAnthropic", "link"));
   nodes.push(button("Rebuild project index", "ironbase.clearIndex", "link"));
   nodes.push(button("Sign out", "ironbase.signOut", "link"));

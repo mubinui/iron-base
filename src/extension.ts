@@ -4,7 +4,14 @@ import { getConfig, getGoogleClient } from "./config";
 import { runAnalysis, type ProgressEvent } from "./engine/agentLoop";
 import type { AnalysisReport } from "./engine/findings";
 import type { RunMode } from "./engine/prompts";
-import { LlmCancelledError, LlmHttpError, PROVIDER_LABELS } from "./llm/types";
+import {
+  LlmCancelledError,
+  LlmHttpError,
+  MODEL_CHOICES,
+  PROVIDER_LABELS,
+  type LlmClient,
+  type ProviderId,
+} from "./llm/types";
 import { buildDigest } from "./memory/digest";
 import { updateIndex } from "./memory/indexer";
 import { IndexStore, rememberFindings } from "./memory/store";
@@ -50,6 +57,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("ironbase.signInAnthropic", signInAnthropic),
     register("ironbase.signInGoogle", signInGoogle),
     register("ironbase.signInOpenAi", signInOpenAi),
+    register("ironbase.chooseModel", chooseModel),
     register("ironbase.clearIndex", clearIndex),
     register("ironbase.signOut", signOut),
     register("ironbase.cancel", cancelRun),
@@ -79,12 +87,24 @@ function register(command: string, handler: () => Promise<void> | void): vscode.
 async function refreshAuthState(): Promise<void> {
   const client = await auth.getActiveClient();
   const label = client ? PROVIDER_LABELS[client.id] : undefined;
-  sidebar.setState({ providerLabel: label });
+  sidebar.setState({
+    providerLabel: label,
+    model: client ? describeModel(client) : undefined,
+  });
   statusBar.text = `$(pulse) IronBase: ${label ?? "sign in"}`;
   statusBar.tooltip = client
     ? `IronBase is using ${label} (${client.model})`
     : "IronBase — click to connect an AI account";
   statusBar.show();
+}
+
+/** Names the resolved model the way the picker lists it, so the two agree. */
+function describeModel(client: LlmClient): { label: string; automatic: boolean } {
+  const known = MODEL_CHOICES[client.id].find((choice) => choice.id === client.model);
+  return {
+    label: known?.label ?? client.model,
+    automatic: getConfig().model.length === 0,
+  };
 }
 
 // --- Analysis runs ---------------------------------------------------------
@@ -342,6 +362,87 @@ async function signInOpenAi(): Promise<void> {
     await refreshAuthState();
     void vscode.window.showInformationMessage("IronBase is connected to your ChatGPT account.");
   }
+}
+
+// --- Model selection -------------------------------------------------------
+
+interface ModelPick extends vscode.QuickPickItem {
+  provider: ProviderId | "auto";
+  /** Empty leaves the model unpinned, so the provider decides. */
+  model: string;
+}
+
+/**
+ * Offers the models of every connected account. A model id belongs to exactly
+ * one provider, so choosing one pins the provider as well — otherwise a Claude
+ * id could be sent to ChatGPT the next time "auto" resolved differently.
+ */
+async function chooseModel(): Promise<void> {
+  const connected = await auth.availableProviders();
+  if (connected.length === 0) {
+    sidebar.reveal();
+    void vscode.window.showWarningMessage(
+      "Connect an account first — IronBase offers the models that account allows.",
+    );
+    return;
+  }
+
+  const config = getConfig();
+  const isCurrent = (provider: ProviderId | "auto", model: string): boolean =>
+    config.provider === provider && config.model === model;
+
+  const items: (ModelPick | vscode.QuickPickItem)[] = [
+    {
+      label: "Automatic",
+      description: isCurrent("auto", "") ? "current" : undefined,
+      detail: "First connected account, and whichever model that account allows.",
+      provider: "auto",
+      model: "",
+    },
+  ];
+
+  for (const id of connected) {
+    items.push({
+      label: PROVIDER_LABELS[id],
+      kind: vscode.QuickPickItemKind.Separator,
+    });
+    items.push({
+      label: "Automatic",
+      description: isCurrent(id, "") ? "current" : undefined,
+      detail: `Always ${PROVIDER_LABELS[id]}, with whichever model the account allows.`,
+      provider: id,
+      model: "",
+    });
+    for (const choice of MODEL_CHOICES[id]) {
+      items.push({
+        label: choice.label,
+        description: isCurrent(id, choice.id) ? `${choice.note} · current` : choice.note,
+        detail: choice.id,
+        provider: id,
+        model: choice.id,
+      });
+    }
+  }
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: "IronBase: Model",
+    placeHolder: "Choose the account and model to review with",
+    matchOnDetail: true,
+  });
+  if (!picked || !("provider" in picked)) return;
+
+  const settings = vscode.workspace.getConfiguration("ironbase");
+  await settings.update("provider", picked.provider, vscode.ConfigurationTarget.Global);
+  await settings.update("model", picked.model, vscode.ConfigurationTarget.Global);
+  await refreshAuthState();
+
+  void vscode.window.showInformationMessage(
+    picked.model
+      ? `IronBase will review with ${picked.label}.`
+      : picked.provider === "auto"
+        ? "IronBase will choose an account and model automatically."
+        : `IronBase will use ${PROVIDER_LABELS[picked.provider]}, with an automatic model.`,
+  );
 }
 
 /** Drops the cached index so the next review re-reads everything from scratch. */

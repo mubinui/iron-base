@@ -19,6 +19,11 @@ export type WebviewMessage =
 export interface SidebarState {
   /** Empty when nothing is signed in. */
   providerLabel: string | undefined;
+  /**
+   * The model the next run will use. `automatic` means nothing is pinned in
+   * settings, so `label` is only what the account resolved to this time.
+   */
+  model?: { label: string; automatic: boolean };
   running: boolean;
   /** Short description of what the run is doing right now. */
   activity?: string;

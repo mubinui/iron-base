@@ -125,6 +125,7 @@ actually goes somewhere.
 | `IronBase: Connect Claude Account` | Sign in with Claude Pro/Max |
 | `IronBase: Connect ChatGPT Account` | Sign in with ChatGPT Plus/Pro |
 | `IronBase: Connect Gemini Account` | Sign in with a Google account |
+| `IronBase: Choose Model…` | Pick which connected account and model to review with |
 | `IronBase: Sign Out / Clear Credentials` | Delete every stored credential |
 | `IronBase: Rebuild Project Index` | Drop the cache and re-index from scratch |
 | `IronBase: Cancel Analysis` | Stop a running review |
@@ -136,7 +137,7 @@ actually goes somewhere.
 | Setting | Default | Controls |
 | --- | --- | --- |
 | `ironbase.provider` | `auto` | Which connected account to use |
-| `ironbase.model` | *(empty)* | Model override; empty uses the account default |
+| `ironbase.model` | *(empty)* | Model override; empty lets the account decide |
 | `ironbase.ignoreGlobs` | `node_modules`, `dist`, … | Extra paths to skip, on top of `.gitignore` |
 | `ironbase.maxFiles` | `2000` | Cap on files indexed |
 | `ironbase.maxFileReadBytes` | `64000` | Cap on bytes per file read |
