@@ -180,49 +180,79 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
 
 // --- Header ----------------------------------------------------------------
 
+/**
+ * The header, in two zones.
+ *
+ * One flat row of a dozen items is what broke on resize: a flex row with no
+ * wrapping simply runs off the edge of a 300px sidebar, and everything past the
+ * halfway point became unreachable. Identity and actions stay on the top line
+ * where they are always needed; the meters sit on their own line underneath and
+ * wrap among themselves, so narrowing the view reflows them instead of
+ * clipping them.
+ */
 function renderHead(): void {
   head.replaceChildren();
 
+  const top = el("div", undefined, "head-row");
+
   // Back to the account/review screen. The build lives in the sidebar now, so
   // there has to be a way out of it that is not "close the whole view".
-  head.append(
+  top.append(
     iconButton("Back", "chevron", () =>
       vscode.postMessage({ type: "command", command: "ironbase.buildHome" }),
     ),
   );
-
-  // The session's own name, not the product's. Which build you are looking at
-  // matters more here than which extension you are in.
-  const title = el("span", state.sessionTitle || "New build", "title");
-  title.title = state.sessionTitle;
-  head.append(title);
 
   const chip = el("span", undefined, `mode-chip ${state.agent}`);
   chip.append(
     icon(state.agent === "architect" ? "compass" : "hammer", 11),
     el("span", state.agent === "architect" ? "Architect" : "Build"),
   );
-  head.append(chip);
+  top.append(chip);
 
-  if (state.activity) {
-    head.append(icon("spinner", 12), el("span", state.activity, "meter"));
-  } else if (state.running && state.iteration) {
-    head.append(
-      icon("spinner", 12),
-      el("span", `step ${state.iteration.current}/${state.iteration.max}`, "meter"),
+  // The session's own name, not the product's. Which build you are looking at
+  // matters more here than which extension you are in. It takes the slack and
+  // truncates, so it is the thing that gives way rather than the controls.
+  const title = el("span", state.sessionTitle || "New build", "title");
+  title.title = state.sessionTitle;
+  top.append(title);
+
+  const actions = el("div", undefined, "head-actions");
+  if (state.running) {
+    const stop = el("button", undefined, "btn stop");
+    stop.append(icon("stopCircle", 13), el("span", "Stop"));
+    stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+    actions.append(stop);
+  } else {
+    actions.append(
+      iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
+      iconButton("Past builds", "history", () => vscode.postMessage({ type: "switchSession" })),
+      // The sidebar is narrow; a long diff is easier to read across an editor.
+      iconButton("Open in editor", "layers", () =>
+        vscode.postMessage({ type: "command", command: "ironbase.buildInEditor" }),
+      ),
+      iconButton("Export", "download", () => vscode.postMessage({ type: "exportSession" })),
     );
   }
+  top.append(actions);
+  head.append(top);
 
-  head.append(el("span", undefined, "spacer"));
+  // --- Meters ---------------------------------------------------------------
 
-  if (state.changedFiles > 0) {
-    const revert = button(
-      `${state.changedFiles} file${state.changedFiles === 1 ? "" : "s"} changed`,
-      "btn quiet",
-      () => vscode.postMessage({ type: "revertAll" }),
+  const meters = el("div", undefined, "head-meters");
+
+  if (state.activity) {
+    const busy = el("span", undefined, "meter busy");
+    busy.append(icon("spinner", 12, "glyph"), el("span", state.activity));
+    meters.append(busy);
+  } else if (state.running && state.iteration) {
+    const busy = el("span", undefined, "meter busy");
+    busy.append(
+      icon("spinner", 12, "glyph"),
+      el("span", `${state.iteration.current}/${state.iteration.max}`),
     );
-    revert.title = "Put every file back to how it was before this build";
-    head.append(revert);
+    busy.title = `Step ${state.iteration.current} of ${state.iteration.max}`;
+    meters.append(busy);
   }
 
   // How full the model's context is — the number that predicts when the
@@ -236,51 +266,38 @@ function renderHead(): void {
         ? "The earlier part of this conversation will be summarised to make room."
         : "How much of the model's context window this conversation is using.";
     if (percent >= 65) gauge.classList.add("warn-text");
-    head.append(gauge);
+    meters.append(gauge);
   }
 
   if (state.usage) {
     const total = state.usage.inputTokens + state.usage.outputTokens;
     const tokens = el("span", undefined, "meter");
     tokens.title = `${total.toLocaleString()} tokens this build`;
-    tokens.append(icon("layers", 12, "glyph"), el("b", formatTokens(total)));
-    head.append(tokens);
+    tokens.append(icon("layers", 12, "glyph"), el("span", formatTokens(total)));
+    meters.append(tokens);
 
     // Money only where there is money: a subscription or a local model shows
     // the token count and nothing else, because the honest cost is zero extra.
     if (state.usage.costUsd !== undefined) {
       const cost = el("span", undefined, "meter");
       cost.title = "Estimated cost of this build";
-      cost.append(icon("coin", 12, "glyph"), el("b", formatCost(state.usage.costUsd)));
-      head.append(cost);
+      cost.append(icon("coin", 12, "glyph"), el("span", formatCost(state.usage.costUsd)));
+      meters.append(cost);
     }
   }
-  if (state.model) {
-    const model = el("button", undefined, "meter model");
-    model.append(el("span", state.model), icon("chevron", 10, "caret"));
-    model.title = `${state.providerLabel ? `${state.providerLabel} · ` : ""}${state.model}\nClick to change account or model`;
-    model.addEventListener("click", () =>
-      vscode.postMessage({ type: "command", command: "ironbase.chooseModel" }),
+
+  if (state.changedFiles > 0) {
+    const revert = el("button", undefined, "meter changed");
+    revert.append(
+      icon("cycle", 12, "glyph"),
+      el("span", `${state.changedFiles} changed`),
     );
-    head.append(model);
+    revert.title = "Put every file back to how it was before this build";
+    revert.addEventListener("click", () => vscode.postMessage({ type: "revertAll" }));
+    meters.append(revert);
   }
 
-  if (state.running) {
-    const stop = el("button", undefined, "btn stop");
-    stop.append(icon("stopCircle", 13), el("span", "Stop"));
-    stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
-    head.append(stop);
-  } else {
-    head.append(
-      iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
-      iconButton("Past builds", "history", () => vscode.postMessage({ type: "switchSession" })),
-      // The sidebar is narrow; a long diff is easier to read across an editor.
-      iconButton("Open in editor", "layers", () =>
-        vscode.postMessage({ type: "command", command: "ironbase.buildInEditor" }),
-      ),
-      iconButton("Export", "download", () => vscode.postMessage({ type: "exportSession" })),
-    );
-  }
+  if (meters.children.length > 0) head.append(meters);
 }
 
 function iconButton(label: string, glyph: IconName, onClick: () => void): HTMLElement {
@@ -558,7 +575,10 @@ function renderComposer(): void {
   input.disabled = state.running;
   inner.append(input);
 
-  const row = el("div", undefined, "row");
+  // Two rows rather than one, for the same reason as the header: five controls
+  // on a line do not fit a sidebar, and the one that fell off the end was the
+  // send button.
+  const row = el("div", undefined, "row controls");
 
   const segmented = el("div", undefined, "segmented");
   const planButton = el("button", undefined, mode === "architect" ? "on" : undefined);
@@ -596,7 +616,9 @@ function renderComposer(): void {
     vscode.postMessage({ type: "command", command: "ironbase.chooseModel" }),
   );
   row.append(model);
+  inner.append(row);
 
+  const actions = el("div", undefined, "row actions");
   const toggle = el("label", undefined, "toggle");
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
@@ -606,22 +628,22 @@ function renderComposer(): void {
   );
   toggle.append(checkbox, el("span", "Auto-accept edits"));
   toggle.title = "Apply edits without asking. Deletions and commands still ask.";
-  row.append(toggle, el("span", undefined, "spacer"));
+  actions.append(toggle, el("span", undefined, "spacer"));
 
   if (state.running) {
     const stop = el("button", undefined, "btn stop");
     stop.append(icon("stopCircle", 13), el("span", "Stop"));
     stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
-    row.append(stop);
+    actions.append(stop);
   } else {
     const sendButton = el("button", undefined, "btn primary send");
     sendButton.append(el("span", "Send"), icon("send", 13));
     sendButton.title = "Enter to send, Shift+Enter for a new line";
     sendButton.addEventListener("click", send);
-    row.append(sendButton);
+    actions.append(sendButton);
   }
 
-  inner.append(row);
+  inner.append(actions);
   composer.append(inner);
   // Re-appending the textarea drops its focus, so it is restored — but only if
   // the developer was not busy in the editor or in a permission card.
