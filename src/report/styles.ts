@@ -1134,11 +1134,13 @@ ${BUTTONS}
 body {
   margin: 0;
   font-family: var(--vscode-font-family);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.62;
+  letter-spacing: -0.003em;
   color: var(--ink);
   background: var(--vscode-editor-background);
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 #root { display: flex; flex-direction: column; height: 100vh; min-width: 0; }
 
@@ -1507,96 +1509,186 @@ button.meter.changed { color: var(--sev-medium); }
 .done-card .body { padding: var(--space-4); }
 
 /* ---- Composer ---- */
+/*
+ * One surface, with its controls inside it. The textarea has no border of its
+ * own: the box takes the focus ring, so typing lights up the whole control
+ * rather than a rectangle inside another rectangle.
+ */
 .composer {
   flex: 0 0 auto;
-  border-top: 1px solid var(--hairline);
-  background: var(--surface-sunken);
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  padding: var(--space-2) var(--space-4) var(--space-4);
+  background: var(--vscode-editor-background);
 }
 .composer .inner { max-width: 60rem; margin-inline: auto; min-width: 0; }
+
+.composer-box {
+  position: relative;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 16px;
+  background: var(--vscode-input-background, var(--surface));
+  box-shadow: var(--shadow-sm);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.composer-box:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-sm);
+}
+.composer-box.signed-out { padding: var(--space-4); display: grid; gap: var(--space-3); justify-items: start; }
+
 .composer textarea {
+  display: block;
   width: 100%;
-  min-height: 4.2rem;
+  min-height: 3.2rem;
   max-height: 14rem;
-  resize: vertical;
+  resize: none;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.55;
   color: var(--ink);
-  background: var(--vscode-input-background, var(--surface));
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--chat-radius);
-  padding: var(--space-3);
-  transition: border-color 130ms ease, box-shadow 130ms ease;
+  background: transparent;
+  border: none;
+  padding: 0.85rem 1rem 0.35rem;
 }
-.composer textarea:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.composer .row {
+.composer textarea:focus { outline: none; }
+.composer textarea::placeholder { color: var(--ink-muted); opacity: 0.72; }
+
+.composer-bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
-  margin-top: var(--space-2);
+  padding: 0.4rem 0.5rem 0.5rem;
+  min-width: 0;
 }
-.composer .row .spacer { flex: 1 1 auto; }
-.composer .row.actions { gap: var(--space-3); }
+.composer-bar .spacer { flex: 1 1 auto; min-width: 0; }
 
-.segmented {
-  display: inline-flex;
-  flex: 0 0 auto;
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-.segmented button {
+/* A chip is a setting you can see and change without leaving the box. */
+.bar-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.32rem;
-  padding: 0.3rem 0.65rem;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
   font-size: 11.5px;
   color: var(--ink-muted);
-  border-radius: 0;
-  border: none;
+  border: 1px solid transparent;
   white-space: nowrap;
 }
-.segmented button:hover { background: var(--surface-raised); color: var(--ink); }
-.segmented button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.segmented button.on:hover { background: var(--accent-soft); }
+.bar-chip:hover { background: var(--surface-raised); color: var(--ink); }
+.bar-chip.on {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 12%, transparent);
+  border-color: color-mix(in srgb, var(--good) 32%, transparent);
+}
+.bar-chip svg { flex: 0 0 auto; }
 
-/* The model picker: a control, and it has to look like one. A label nobody can
-   click is not somewhere people look for a setting. */
 .model-pick {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 100%;
-  padding: 0.26rem 0.5rem;
-  border: 1px solid var(--hairline-strong);
-  border-radius: var(--radius-sm);
+  padding: 0.3rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
   font-size: 11.5px;
-  color: var(--ink);
-  background: var(--surface);
+  color: var(--ink-muted);
+  background: none;
 }
-.model-pick:hover:not(:disabled) { background: var(--surface-raised); border-color: var(--accent); }
+.model-pick:hover:not(:disabled) { background: var(--surface-raised); color: var(--ink); }
 .model-pick > span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--mono);
-  font-size: 11px;
 }
-.model-pick svg, .model-pick .caret { flex: 0 0 auto; }
-.model-pick .caret { opacity: 0.5; }
+.model-pick svg { flex: 0 0 auto; }
+
+/* The send button, round, the way every composer signals "go". */
+.circle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+}
+.circle-btn.send {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+}
+.circle-btn.send:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.circle-btn.stop { background: var(--sev-critical); color: #fff; }
+.circle-btn.stop:hover { filter: brightness(1.1); }
+
+/* ---- Popover ---- */
+/*
+ * Anchored above its button, because the button is at the bottom of the view.
+ * VS Code's own quick pick opens at the top of the window, which for a control
+ * down here means the eye has to travel the whole height to find the answer.
+ */
+.popover {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  /* Never wider than the bar it hangs off, or it escapes the left edge in a
+     narrow sidebar: pinning the right edge only holds that one side. */
+  min-width: min(15rem, 100%);
+  max-width: min(22rem, 100%);
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-md);
+  background: var(--vscode-editorWidget-background, var(--surface-raised));
+  box-shadow: var(--shadow-md);
+}
+.popover-group {
+  padding: var(--space-2) var(--space-2) var(--space-1);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.popover-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border-radius: var(--radius-sm);
+  border: none;
+  text-align: left;
+  min-width: 0;
+}
+.popover-row:hover { background: var(--surface-raised); }
+.popover-row.current { color: var(--accent); }
+.popover-row svg { flex: 0 0 auto; }
+.popover-row .body { display: grid; min-width: 0; }
+.popover-row .name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popover-row .detail {
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.popover-row .tick { margin-left: auto; color: var(--accent); }
+.popover-empty { padding: var(--space-3); font-size: 12px; color: var(--ink-muted); }
 
 .toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 11.5px; color: var(--ink-muted); cursor: pointer; white-space: nowrap; }
 .toggle input { accent-color: var(--accent); }
-.hint { font-size: 10.5px; color: var(--ink-muted); }
+.hint { font-size: 11.5px; color: var(--ink-muted); margin: 0; }
 
 /* ---- Empty state ---- */
 .empty { max-width: 32rem; margin: 8vh auto 0; text-align: center; padding: 0 var(--space-2); }

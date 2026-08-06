@@ -41,13 +41,14 @@ import {
 import { scanWorkspace } from "../scanner/workspaceScanner";
 import { createNonce } from "../report/reportPanel";
 import { CHAT_STYLES } from "../report/styles";
-import { PROVIDER_LABELS } from "../llm/types";
+import { PROVIDER_LABELS, type ProviderId } from "../llm/types";
 import { log } from "../util/log";
 import { resolveInside } from "../util/paths";
 import {
   type ChatHostMessage,
   type ChatState,
   type ChatWebviewMessage,
+  type ModelOption,
   type PermissionCard,
   type ThreadItem,
   isAllowedCommand,
@@ -61,6 +62,10 @@ export interface ChatPanelDeps {
   auth: AuthManager;
   indexStore: IndexStore;
   sessionStore: SessionStore;
+  /** Every model the connected accounts offer, for the composer's own menu. */
+  listModels: () => Promise<ModelOption[]>;
+  /** Pins an account and model. */
+  applyModel: (provider: ProviderId | "auto", model: string) => Promise<void>;
 }
 
 /**
@@ -720,6 +725,19 @@ export class ChatController {
         }
         break;
       }
+
+      case "requestModels":
+        void (async () => {
+          this.post({ type: "modelOptions", options: await this.deps.listModels() });
+        })();
+        break;
+
+      case "selectModel":
+        void (async () => {
+          await this.deps.applyModel(message.provider, message.model);
+          await this.refreshAccount();
+        })();
+        break;
 
       case "setAutoAccept":
         this.session?.setAutoAcceptEdits(message.on);

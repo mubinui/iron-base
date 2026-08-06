@@ -144,6 +144,26 @@ export type ThreadItem =
   | { kind: "plan"; plan: BuildPlan }
   | { kind: "finished"; summary: string; followUps: string[] };
 
+/**
+ * One row in the composer's model menu.
+ *
+ * Built by the host because only it can ask an account what it is entitled to,
+ * but rendered by the webview because a menu anchored to the composer has to
+ * open upward from it — and VS Code's own quick pick always appears at the top
+ * of the window, which is the wrong end for a control at the bottom.
+ */
+export interface ModelOption {
+  provider: ProviderId | "auto";
+  model: string;
+  label: string;
+  detail?: string;
+  /** Which brand mark to draw, when the row belongs to a specific account. */
+  providerId?: ProviderId;
+  /** The account this row sits under, so the menu can group. */
+  group: string;
+  current: boolean;
+}
+
 /** The question on a permission card, and what it needs to show. */
 export interface PermissionCard {
   id: string;
@@ -198,7 +218,8 @@ export type ChatHostMessage =
   | { type: "permission"; request: PermissionCard }
   /** Takes the card off screen — answered, cancelled, or the run ended. */
   | { type: "permissionClosed"; id: string; decision: PermissionDecision }
-  | { type: "changeReverted"; id: string };
+  | { type: "changeReverted"; id: string }
+  | { type: "modelOptions"; options: ModelOption[] };
 
 export type ChatWebviewMessage =
   | { type: "ready" }
@@ -209,6 +230,8 @@ export type ChatWebviewMessage =
   | { type: "discardPlan" }
   | { type: "permissionDecision"; id: string; decision: PermissionDecision }
   | { type: "setAutoAccept"; on: boolean }
+  | { type: "requestModels" }
+  | { type: "selectModel"; provider: ProviderId | "auto"; model: string }
   | { type: "openFile"; file: string; line?: number }
   | { type: "showDiff"; id: string }
   | { type: "revertChange"; id: string }

@@ -27,6 +27,7 @@ import { DiagnosticsPublisher } from "./report/diagnostics";
 import { exportReport } from "./report/markdownExport";
 import { ReportPanel } from "./report/reportPanel";
 import { SidebarView } from "./report/sidebarView";
+import type { ModelOption } from "./protocol";
 import { describeError, initLog, log } from "./util/log";
 
 let auth: AuthManager;
@@ -169,6 +170,18 @@ function describeModel(client: LlmClient): { label: string; automatic: boolean }
 
 // --- Build panel -----------------------------------------------------------
 
+/** Everything the build conversation needs from the extension host. */
+function chatDeps(): Parameters<typeof ChatController.forWorkspace>[0] {
+  return {
+    extensionUri,
+    auth,
+    indexStore,
+    sessionStore,
+    listModels: listModelOptions,
+    applyModel: applyModelChoice,
+  };
+}
+
 /**
  * Opens the build panel, connecting an account first if there is none.
  *
@@ -190,7 +203,7 @@ async function openBuildPanel(): Promise<void> {
   // build, and being thrown into a new tab to answer the first permission
   // prompt is a context switch nobody asked for. `Open in editor` is in the
   // build header for when a diff wants the room.
-  const controller = ChatController.forWorkspace({ extensionUri, auth, indexStore, sessionStore });
+  const controller = ChatController.forWorkspace(chatDeps());
   if (controller) sidebar.showBuild(controller);
 }
 
@@ -204,7 +217,7 @@ async function openBuildPanel(): Promise<void> {
 async function withBuildPanel(
   action: (controller: ChatController) => Promise<void> | void,
 ): Promise<void> {
-  const controller = ChatController.forWorkspace({ extensionUri, auth, indexStore, sessionStore });
+  const controller = ChatController.forWorkspace(chatDeps());
   if (!controller) return;
   if (sidebar.currentScreen !== "build" && !ChatPanel.active) sidebar.showBuild(controller);
   await action(controller);
@@ -224,7 +237,7 @@ async function revertRun(): Promise<void> {
 
 /** Moves the conversation into an editor tab, where a diff has room. */
 function openBuildInEditor(): void {
-  ChatPanel.show({ extensionUri, auth, indexStore, sessionStore });
+  ChatPanel.show(chatDeps());
 }
 
 // --- Analysis runs ---------------------------------------------------------
@@ -724,6 +737,82 @@ const CUSTOM_MODEL = "\0custom";
  * covers whatever falls off the end.
  */
 const MAX_LISTED_MODELS = 40;
+
+/**
+ * Every model the connected accounts offer, as plain data.
+ *
+ * Shared by the command palette's quick pick and the composer's own menu, so
+ * the two can never disagree about what is available — and so the live-fetched
+ * half, which is the part that goes stale, is fetched once in one place.
+ */
+export async function listModelOptions(): Promise<ModelOption[]> {
+  const connected = await auth.availableProviders();
+  if (connected.length === 0) return [];
+
+  const config = getConfig();
+  const isCurrent = (provider: ProviderId | "auto", model: string): boolean =>
+    config.provider === provider && config.model === model;
+
+  const options: ModelOption[] = [
+    {
+      provider: "auto",
+      model: "",
+      label: "Automatic",
+      detail: "First connected account, and whichever model it allows",
+      group: "Any account",
+      current: isCurrent("auto", ""),
+    },
+  ];
+
+  for (const id of connected) {
+    const group = PROVIDER_LABELS[id];
+    options.push({
+      provider: id,
+      model: "",
+      label: "Automatic",
+      detail: `Always ${group}, model chosen for you`,
+      providerId: id,
+      group,
+      current: isCurrent(id, ""),
+    });
+    for (const choice of MODEL_CHOICES[id]) {
+      options.push({
+        provider: id,
+        model: choice.id,
+        label: choice.label,
+        detail: choice.note,
+        providerId: id,
+        group,
+        current: isCurrent(id, choice.id),
+      });
+    }
+
+    const listed = await auth.listModels(id);
+    const known = new Set(MODEL_CHOICES[id].map((c) => c.id));
+    for (const model of listed.filter((m) => !known.has(m)).slice(0, MAX_LISTED_MODELS)) {
+      options.push({
+        provider: id,
+        model,
+        label: model,
+        providerId: id,
+        group,
+        current: isCurrent(id, model),
+      });
+    }
+  }
+  return options;
+}
+
+/** Pins an account and model, and tells the sidebar and status bar about it. */
+export async function applyModelChoice(
+  provider: ProviderId | "auto",
+  model: string,
+): Promise<void> {
+  const settings = vscode.workspace.getConfiguration("ironbase");
+  await settings.update("provider", provider, vscode.ConfigurationTarget.Global);
+  await settings.update("model", model, vscode.ConfigurationTarget.Global);
+  await refreshAuthState();
+}
 
 /**
  * Offers the models of every connected account. A model id belongs to exactly

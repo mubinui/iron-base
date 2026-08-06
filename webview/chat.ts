@@ -19,6 +19,7 @@ import type {
   ChatMode,
   ChatState,
   ChatWebviewMessage,
+  ModelOption,
   PermissionCard,
   ThreadItem,
 } from "../src/protocol";
@@ -77,6 +78,11 @@ input.addEventListener("keydown", (event) => {
     event.preventDefault();
     send();
   }
+});
+
+document.addEventListener("click", () => closeModelMenu());
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeModelMenu();
 });
 
 window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
@@ -175,6 +181,10 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
       changeNodes.get(message.id)?.classList.add("reverted");
       break;
     }
+
+    case "modelOptions":
+      fillModelMenu(message.options);
+      break;
   }
 });
 
@@ -556,95 +566,117 @@ function diffBody(hunks: DiffHunk[]): HTMLElement {
 
 // --- Composer --------------------------------------------------------------
 
+/**
+ * The composer: one box, with its controls inside it.
+ *
+ * Previously the textarea sat in a bordered box and the controls floated on
+ * rows underneath, which read as three separate things stacked up rather than
+ * one place where you say what you want. Everything is inside a single rounded
+ * surface now, and the surface itself takes the focus ring, so typing lights up
+ * the whole control instead of a rectangle inside it.
+ */
 function renderComposer(): void {
   composer.replaceChildren();
   const inner = el("div", undefined, "inner");
 
   if (!state.providerLabel) {
-    inner.append(
+    const empty = el("div", undefined, "composer-box signed-out");
+    empty.append(
       el("p", "No AI account is connected yet.", "hint"),
       button("Connect an account", "btn primary", () =>
         vscode.postMessage({ type: "command", command: "ironbase.connectAccount" }),
       ),
     );
+    inner.append(empty);
     composer.append(inner);
     return;
   }
 
+  const box = el("div", undefined, "composer-box");
   input.value = draft;
   input.disabled = state.running;
-  inner.append(input);
+  input.placeholder = state.running
+    ? "Working…"
+    : mode === "architect"
+      ? "Describe a change — it will plan first"
+      : "Describe a change — it will start writing";
+  box.append(input);
 
-  // Two rows rather than one, for the same reason as the header: five controls
-  // on a line do not fit a sidebar, and the one that fell off the end was the
-  // send button.
-  const row = el("div", undefined, "row controls");
+  const bar = el("div", undefined, "composer-bar");
 
-  const segmented = el("div", undefined, "segmented");
-  const planButton = el("button", undefined, mode === "architect" ? "on" : undefined);
-  planButton.append(icon("compass", 12), el("span", "Plan first"));
-  planButton.title = "Explore read-only and hand you a plan to approve";
-  const buildButton = el("button", undefined, mode === "build" ? "on" : undefined);
-  buildButton.append(icon("hammer", 12), el("span", "Build only"));
-  buildButton.title = "Skip planning and start writing";
-  planButton.addEventListener("click", () => {
-    mode = "architect";
+  // Left: the two things you set before sending.
+  bar.append(
+    iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
+  );
+
+  const modeButton = el("button", undefined, "bar-chip");
+  modeButton.append(
+    icon(mode === "architect" ? "compass" : "hammer", 13),
+    el("span", mode === "architect" ? "Plan first" : "Build only"),
+  );
+  modeButton.title =
+    mode === "architect"
+      ? "Explores read-only and hands you a plan to approve. Click to build straight away instead."
+      : "Starts writing straight away. Click to plan first instead.";
+  modeButton.addEventListener("click", () => {
+    mode = mode === "architect" ? "build" : "architect";
     renderComposer();
   });
-  buildButton.addEventListener("click", () => {
-    mode = "build";
-    renderComposer();
-  });
-  segmented.append(planButton, buildButton);
-  row.append(segmented);
+  bar.append(modeButton);
 
-  // The model picker sits with the mode selector, because "which model" and
-  // "plan or build" are the same decision made at the same moment — and a
-  // header label you cannot click is not somewhere anyone looks for a setting.
+  const approve = el("button", undefined, `bar-chip${state.autoAcceptEdits ? " on" : ""}`);
+  approve.append(
+    icon(state.autoAcceptEdits ? "check" : "signIn", 13),
+    el("span", state.autoAcceptEdits ? "Approve for me" : "Ask me"),
+  );
+  approve.title = state.autoAcceptEdits
+    ? "Edits are applied without asking. Deletions and commands still ask. Click to be asked again."
+    : "Every edit shows you a diff first. Click to apply edits without asking.";
+  approve.addEventListener("click", () =>
+    vscode.postMessage({ type: "setAutoAccept", on: !state.autoAcceptEdits }),
+  );
+  bar.append(approve, el("span", undefined, "spacer"));
+
+  // Right: which model, and go.
   const model = document.createElement("button");
   model.className = "model-pick";
   model.append(
     icon(state.providerId ? (PROVIDER_ICONS[state.providerId] as IconName) : "key", 12),
     el("span", state.model || "Choose a model"),
-    icon("chevron", 10, "caret"),
   );
-  model.title = "Change the account or model this build runs on";
-  // Switching mid-turn takes effect on the next step anyway, but offering it
-  // while a request is in flight invites a click that looks ignored.
-  model.disabled = state.running;
-  model.addEventListener("click", () =>
-    vscode.postMessage({ type: "command", command: "ironbase.chooseModel" }),
-  );
-  row.append(model);
-  inner.append(row);
-
-  const actions = el("div", undefined, "row actions");
-  const toggle = el("label", undefined, "toggle");
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = state.autoAcceptEdits;
-  checkbox.addEventListener("change", () =>
-    vscode.postMessage({ type: "setAutoAccept", on: checkbox.checked }),
-  );
-  toggle.append(checkbox, el("span", "Auto-accept edits"));
-  toggle.title = "Apply edits without asking. Deletions and commands still ask.";
-  actions.append(toggle, el("span", undefined, "spacer"));
+  // Deliberately live during a run. The loop re-resolves the account before
+  // every step, so switching mid-build genuinely takes effect on the next one —
+  // which is exactly when you want it, having just watched it burn through the
+  // budget on something a cheaper model could finish.
+  model.title = state.running
+    ? "Change the account or model — takes effect on the next step"
+    : "Change the account or model this build runs on";
+  model.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleModelMenu(model);
+  });
+  bar.append(model);
 
   if (state.running) {
-    const stop = el("button", undefined, "btn stop");
-    stop.append(icon("stopCircle", 13), el("span", "Stop"));
+    const stop = el("button", undefined, "circle-btn stop");
+    stop.title = "Stop";
+    stop.setAttribute("aria-label", "Stop");
+    stop.append(icon("stopCircle", 15));
     stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
-    actions.append(stop);
+    bar.append(stop);
   } else {
-    const sendButton = el("button", undefined, "btn primary send");
-    sendButton.append(el("span", "Send"), icon("send", 13));
-    sendButton.title = "Enter to send, Shift+Enter for a new line";
+    const sendButton = el("button", undefined, "circle-btn send");
+    sendButton.title = "Send — Enter to send, Shift+Enter for a new line";
+    sendButton.setAttribute("aria-label", "Send");
+    sendButton.append(icon("send", 15));
     sendButton.addEventListener("click", send);
-    actions.append(sendButton);
+    bar.append(sendButton);
   }
 
-  inner.append(actions);
+  box.append(bar);
+  inner.append(box);
   composer.append(inner);
+
   // Re-appending the textarea drops its focus, so it is restored — but only if
   // the developer was not busy in the editor or in a permission card.
   if (!state.running && document.activeElement === document.body) input.focus();
@@ -652,7 +684,13 @@ function renderComposer(): void {
 
 /** What the composer draws, so a redraw can be skipped when none of it moved. */
 function composerSignature(): string {
-  return [state.running, state.providerLabel ?? "", state.model ?? "", state.autoAcceptEdits, mode].join("|");
+  return [
+    state.running,
+    state.providerLabel ?? "",
+    state.model ?? "",
+    state.autoAcceptEdits,
+    mode,
+  ].join("|");
 }
 
 /**
@@ -670,6 +708,71 @@ function syncPlanActions(): void {
       (node as HTMLButtonElement).disabled = !live;
     });
   });
+}
+
+// --- Model menu -------------------------------------------------------------
+
+/**
+ * The account and model menu, opening upward from the composer.
+ *
+ * Its own popover rather than VS Code's quick pick, which always appears at the
+ * top of the window — the wrong end entirely for a control sitting at the
+ * bottom, and a jump the eye has to follow every time.
+ */
+let modelMenu: HTMLElement | undefined;
+
+function closeModelMenu(): void {
+  modelMenu?.remove();
+  modelMenu = undefined;
+}
+
+function toggleModelMenu(anchor: HTMLElement): void {
+  if (modelMenu) {
+    closeModelMenu();
+    return;
+  }
+  const menu = el("div", undefined, "popover");
+  menu.append(el("div", "Loading accounts…", "popover-empty"));
+  anchor.parentElement?.append(menu);
+  modelMenu = menu;
+  vscode.postMessage({ type: "requestModels" });
+}
+
+function fillModelMenu(options: ModelOption[]): void {
+  const menu = modelMenu;
+  if (!menu) return;
+  menu.replaceChildren();
+
+  if (options.length === 0) {
+    menu.append(el("div", "No accounts are connected.", "popover-empty"));
+    return;
+  }
+
+  let group = "";
+  for (const option of options) {
+    if (option.group !== group) {
+      group = option.group;
+      menu.append(el("div", group, "popover-group"));
+    }
+    const row = el("button", undefined, `popover-row${option.current ? " current" : ""}`);
+    row.append(
+      icon(option.providerId ? (PROVIDER_ICONS[option.providerId] as IconName) : "layers", 14),
+    );
+    const body = el("span", undefined, "body");
+    body.append(el("span", option.label, "name"));
+    if (option.detail) body.append(el("span", option.detail, "detail"));
+    row.append(body);
+    if (option.current) row.append(icon("check", 13, "tick"));
+    row.addEventListener("click", () => {
+      closeModelMenu();
+      vscode.postMessage({
+        type: "selectModel",
+        provider: option.provider,
+        model: option.model,
+      });
+    });
+    menu.append(row);
+  }
 }
 
 function send(): void {
