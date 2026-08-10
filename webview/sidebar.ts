@@ -8,9 +8,10 @@
 
 import {
   ALL_PROVIDERS,
-  PROVIDER_CREDENTIALS,
   PROVIDER_DETAILS,
   PROVIDER_LABELS,
+  PROVIDER_METHODS,
+  type AuthMethod,
   type ProviderId,
 } from "../src/llm/types";
 import type { AllowedCommand, HostMessage, SidebarState, WebviewMessage } from "../src/protocol";
@@ -103,7 +104,7 @@ function render(state: SidebarState): void {
     ? pinBroken(state, state.pinnedMissing)
     : state.providerLabel
       ? connected(state)
-      : signedOut();
+      : signedOut(state);
   root.replaceChildren(...page);
   if (state.running) startTimer(state.startedAt);
 }
@@ -144,55 +145,170 @@ function pinBroken(state: SidebarState, missing: ProviderId): HTMLElement[] {
 
 // --- Signed out ------------------------------------------------------------
 
-function signedOut(): HTMLElement[] {
-  const out: HTMLElement[] = [];
+/**
+ * Providers led with in the connect matrix.
+ *
+ * The recognisable accounts, so the first screen is names people know rather
+ * than a wall of fourteen. Everything else stays one disclosure away, which is
+ * where choosing between OpenRouter and Groq actually belongs.
+ */
+const FEATURED: ProviderId[] = [
+  "anthropic-oauth",
+  "chatgpt-oauth",
+  "gemini-oauth",
+  "chatgpt-web",
+  "xai",
+  "kimi",
+];
 
-  const welcome = el("div", undefined, "welcome");
-  const marks = el("div", undefined, "mark-row");
-  // Only the real brand marks belong in the hero row — a row of generic key
-  // glyphs says nothing, and the cards below name every provider anyway.
-  for (const account of ACCOUNTS.filter((a) => PROVIDER_CREDENTIALS[a.id] === "oauth")) {
-    const box = el("div");
-    box.append(icon(PROVIDER_ICONS[account.id] as IconName, 19));
-    marks.append(box);
-  }
-  welcome.append(marks);
-  // The headline names what it does now, which is build. Reviewing came first
-  // and is still here, but leading on it undersells the thing to someone
-  // deciding in three seconds whether this is a code agent.
-  welcome.append(el("h1", "Build with your architecture in mind"));
-  welcome.append(
+function signedOut(state: SidebarState): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  const sessionCapable = new Set(state.sessionCapable ?? []);
+
+  // The hero. This is the three-second pitch, so it commits to a look of its
+  // own rather than dissolving into the editor theme — the one place the brand
+  // owns the surface outright. The mark carries the one gradient; the wordmark
+  // stays flat, so the identity reads as a single deliberate accent.
+  const hero = el("div", undefined, "hero");
+  hero.append(brandMark());
+  const wordmark = el("div", undefined, "wordmark");
+  wordmark.append(el("span", "IRON", "w1"), el("span", "BASE", "w2"));
+  hero.append(wordmark);
+  hero.append(el("h1", "The coding agent that starts from your architecture"));
+  hero.append(
     el(
       "p",
-      "Describe a change. IronBase maps your codebase, plans against it, then writes the code and runs your tests — on an AI account you already have.",
-      "muted",
+      "It maps your codebase first — the dependency graph, where the risk sits — then plans a change against that map and writes the code. Runs on an AI account you already have.",
+      "lede",
     ),
   );
-  out.push(welcome);
+  out.push(hero);
 
-  // Three subscription sign-ins, then one row for the other nine.
-  //
-  // Twelve cards was a wall: it made a one-click Claude sign-in look like the
-  // same amount of work as configuring OpenRouter, and pushed the thing most
-  // people want below the fold. The rest are one click away in the picker,
-  // which is where choosing between them belongs anyway.
-  out.push(el("h2", "Connect an account"));
-  const oauth = ACCOUNTS.filter((a) => PROVIDER_CREDENTIALS[a.id] === "oauth");
-  for (const account of oauth) out.push(accountCard(account, false, false));
+  // The matrix: every account, each showing every way it can be connected.
+  out.push(sectionLabel("Connect an account"));
+  const featured = el("div", undefined, "connect-grid");
+  for (const id of FEATURED) featured.append(connectCard(id, sessionCapable));
+  out.push(featured);
 
-  const others = ACCOUNTS.length - oauth.length;
-  out.push(
-    linkButton(`${others} more — API keys, or a model on this machine`, "key", CONNECT),
-  );
+  const rest = ALL_PROVIDERS.filter((id) => !FEATURED.includes(id));
+  const more = el("details", undefined, "more");
+  const summary = document.createElement("summary");
+  summary.append(icon("chevron", 13, "chev"), el("span", `${rest.length} more ways to connect`));
+  more.append(summary);
+  const restGrid = el("div", undefined, "connect-grid");
+  for (const id of rest) restGrid.append(connectCard(id, sessionCapable));
+  more.append(restGrid);
+  out.push(more);
 
   out.push(
     el(
       "div",
-      "Stored in your system keychain, and only ever sent to that provider.",
+      "Every credential is stored in your system keychain, and only ever sent to that provider.",
       "footnote",
     ),
   );
   return out;
+}
+
+/**
+ * One provider, with a button for each way it can be connected.
+ *
+ * The methods come straight from the engine's own matrix, so a provider can
+ * never show a way in the code cannot actually take — and a `webSession` button
+ * appears only where sign-in has been verified, never on a bare declaration.
+ */
+function connectCard(id: ProviderId, sessionCapable: Set<ProviderId>): HTMLElement {
+  const card = el("div", undefined, "connect");
+
+  const mark = el("span", undefined, "mark");
+  mark.append(icon((PROVIDER_ICONS[id] ?? "key") as IconName, 18));
+
+  const body = el("div", undefined, "body");
+  body.append(el("span", PROVIDER_LABELS[id], "name"));
+  body.append(el("span", PROVIDER_DETAILS[id], "detail"));
+
+  const methods = el("div", undefined, "methods");
+  for (const method of PROVIDER_METHODS[id]) {
+    if (method === "webSession" && !sessionCapable.has(id)) continue;
+    methods.append(methodChip(id, method));
+  }
+  body.append(methods);
+
+  card.append(mark, body);
+  return card;
+}
+
+interface MethodLook {
+  label: string;
+  glyph: IconName;
+  primary?: boolean;
+}
+
+/** How each method presents in the matrix. */
+function methodLook(method: AuthMethod): MethodLook {
+  switch (method) {
+    case "oauth":
+      return { label: "Sign in", glyph: "signIn", primary: true };
+    case "webSession":
+      return { label: "Log in — free", glyph: "plug", primary: true };
+    case "apiKey":
+      return { label: "API key", glyph: "key" };
+    case "free":
+      return { label: "Enable", glyph: "play", primary: true };
+    case "local":
+      return { label: "Connect", glyph: "server", primary: true };
+  }
+}
+
+function methodChip(id: ProviderId, method: AuthMethod): HTMLElement {
+  const look = methodLook(method);
+  const chip = el("button", undefined, `chip${look.primary ? " primary" : ""}`);
+  chip.append(icon(look.glyph, 13), el("span", look.label));
+  chip.addEventListener("click", () =>
+    vscode.postMessage({ type: "connectProvider", id, method }),
+  );
+  return chip;
+}
+
+function sectionLabel(text: string): HTMLElement {
+  return el("h2", text, "section");
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * The IronBase mark: three solid tiers narrowing as they rise, white on the
+ * brand gradient.
+ *
+ * The same stepped foundation as the activity-bar icon and the Marketplace
+ * tile, so the product wears one face everywhere. The gradient is the tile's,
+ * from CSS, and the tiers are flat white — no gradient inside the glyph itself,
+ * which keeps it crisp at any size.
+ */
+function brandMark(): HTMLElement {
+  const tile = el("div", undefined, "brand-tile");
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "26");
+  svg.setAttribute("height", "26");
+  svg.setAttribute("aria-hidden", "true");
+  const tiers: Array<[number, number, number, number, number]> = [
+    [8.5, 4, 7, 3.6, 1.3],
+    [6, 10, 12, 3.6, 1.3],
+    [3.5, 16, 17, 4, 1.5],
+  ];
+  for (const [x, y, w, h, r] of tiers) {
+    const rect = document.createElementNS(SVG_NS, "rect");
+    rect.setAttribute("x", String(x));
+    rect.setAttribute("y", String(y));
+    rect.setAttribute("width", String(w));
+    rect.setAttribute("height", String(h));
+    rect.setAttribute("rx", String(r));
+    rect.setAttribute("fill", "#ffffff");
+    svg.append(rect);
+  }
+  tile.append(svg);
+  return tile;
 }
 
 function accountCard(account: Account, isConnected: boolean, isActive: boolean): HTMLElement {

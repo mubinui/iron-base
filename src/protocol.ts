@@ -2,7 +2,7 @@ import type { DiffHunk } from "./engine/diff";
 import type { AnalysisReport, CodeFix, Finding } from "./engine/findings";
 import type { PermissionDecision, PermissionKind } from "./engine/permissions";
 import type { BuildPlan, Todo } from "./engine/plan";
-import type { ProviderId } from "./llm/types";
+import type { AuthMethod, ProviderId } from "./llm/types";
 
 /** Messages the extension host sends to a webview. */
 export type HostMessage =
@@ -63,7 +63,13 @@ export type WebviewMessage =
   | { type: "openFile"; file: string; line?: number }
   | { type: "applyFix"; fixId: string }
   | { type: "previewFix"; fixId: string }
-  | { type: "copyFix"; fixId: string };
+  | { type: "copyFix"; fixId: string }
+  // Connect one provider by one method. Carries arguments the command
+  // allowlist cannot, so the host validates `id` and `method` against the
+  // provider matrix on receipt — the same posture as `isAllowedCommand`,
+  // because this channel also carries model-generated content elsewhere.
+  | { type: "connectProvider"; id: ProviderId; method: AuthMethod }
+  | { type: "disconnectProvider"; id: ProviderId };
 
 export interface SidebarState {
   /** Empty when nothing is signed in. */
@@ -72,6 +78,15 @@ export interface SidebarState {
   providerId?: ProviderId;
   /** Every account with stored credentials, so the user can switch. */
   connected?: ProviderId[];
+  /**
+   * Providers whose browser sign-in has actually been verified.
+   *
+   * The connect matrix offers a "Log in" affordance only for these — every
+   * provider *declares* it can take a session, but the button is shown only
+   * where one has been confirmed to reach a working endpoint, so the UI never
+   * offers a login that would immediately report itself unavailable.
+   */
+  sessionCapable?: ProviderId[];
   /**
    * Set when settings pin an account that has no stored credential, while other
    * accounts *are* connected.

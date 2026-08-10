@@ -1,5 +1,12 @@
 import * as vscode from "vscode";
 import { AuthManager, type ApiKeyProvider } from "./auth/authManager";
+import {
+  CaptureCancelledError,
+  NoBrowserError,
+  captureWebSession,
+} from "./auth/sessionCapture";
+import { BrowserSession } from "./auth/browserSession";
+import { canCaptureSession, sessionConfigFor } from "./llm/webSessions";
 import { ChatController } from "./chat/chatController";
 import { ChatPanel } from "./chat/chatPanel";
 import { getConfig, getGoogleClient } from "./config";
@@ -15,6 +22,8 @@ import {
   PROVIDER_DETAILS,
   PROVIDER_LABELS,
   PROVIDER_SIGNUP,
+  supportsMethod,
+  type AuthMethod,
   type LlmClient,
   type ProviderId,
 } from "./llm/types";
@@ -35,6 +44,10 @@ let sidebar: SidebarView;
 let diagnostics: DiagnosticsPublisher;
 let statusBar: vscode.StatusBarItem;
 let extensionUri: vscode.Uri;
+/** Global storage root, used for the persistent browser profile sign-in uses. */
+let globalStorageUri: vscode.Uri;
+/** The signed-in browser used for providers whose backend must be reached in-page. */
+let browserSession: BrowserSession;
 let indexStore: IndexStore;
 let sessionStore: SessionStore;
 let lastReport: AnalysisReport | undefined;
@@ -46,9 +59,15 @@ export function activate(context: vscode.ExtensionContext): void {
   log.info("IronBase activated.");
 
   extensionUri = context.extensionUri;
+  globalStorageUri = context.globalStorageUri;
   indexStore = new IndexStore(context.globalStorageUri);
   sessionStore = new SessionStore(context.globalStorageUri);
   auth = new AuthManager(context);
+  browserSession = new BrowserSession(
+    vscode.Uri.joinPath(context.globalStorageUri, "browser-profile").fsPath,
+  );
+  auth.attachBrowserSession(browserSession);
+  context.subscriptions.push({ dispose: () => void browserSession.dispose() });
   sidebar = new SidebarView(context.extensionUri);
   diagnostics = new DiagnosticsPublisher(context);
 
@@ -86,6 +105,14 @@ export function activate(context: vscode.ExtensionContext): void {
     register("ironbase.showReport", showReport),
     register("ironbase.dev.dumpRepoMap", dumpRepoMap),
     register("ironbase.dev.ping", pingModel),
+    // Not contributed in package.json, so it never appears in the palette. The
+    // branded connect matrix in the sidebar posts a typed, host-validated
+    // message that lands here — a channel for the arguments the command
+    // allowlist deliberately cannot carry.
+    vscode.commands.registerCommand(
+      "ironbase.internal.connect",
+      (id: ProviderId, method: AuthMethod) => connectWithMethod(id, method),
+    ),
   );
 
   void refreshAuthState();
@@ -123,6 +150,7 @@ async function refreshAuthState(): Promise<void> {
     providerLabel: label,
     providerId: client?.id,
     connected,
+    sessionCapable: ALL_PROVIDERS.filter(canCaptureSession),
     pinnedMissing,
     model: client ? describeModel(client) : undefined,
   });
@@ -503,12 +531,80 @@ async function connectAccount(): Promise<void> {
       return;
     case "apiKey":
       if (picked.id === "chatgpt-web") await connectChatGptWeb();
-      else await signInWithApiKey(picked.id as ApiKeyProvider);
+      else await connectApiKeyProvider(picked.id as ApiKeyProvider);
+      return;
+    case "free":
+      await connectOpenCode();
       return;
     case "local":
-      await connectOllama();
+      if (picked.id === "router") await connectRouter();
+      else await connectOllama();
       return;
   }
+}
+
+/**
+ * Routes a provider + method from the sidebar's connect matrix to its flow.
+ *
+ * The webview names both the provider and how to connect it, so this skips the
+ * picker `connectAccount` shows and goes straight to the chosen door. `method`
+ * has already been checked against `PROVIDER_METHODS` by the host before it got
+ * here, but the switch is exhaustive anyway — an unroutable pair does nothing
+ * rather than guessing.
+ */
+async function connectWithMethod(id: ProviderId, method: AuthMethod): Promise<void> {
+  if (!supportsMethod(id, method)) return;
+  switch (method) {
+    case "oauth":
+      if (id === "anthropic-oauth") await signInAnthropic();
+      else if (id === "chatgpt-oauth") await signInOpenAi();
+      else if (id === "gemini-oauth") await signInGoogle();
+      return;
+    case "apiKey":
+      if (id === "chatgpt-web") await connectChatGptWeb();
+      else if (id === "router") await connectRouter();
+      else await signInWithApiKey(id as ApiKeyProvider);
+      return;
+    case "webSession":
+      await signInWithSession(id);
+      return;
+    case "free":
+      await connectOpenCode();
+      return;
+    case "local":
+      if (id === "router") await connectRouter();
+      else await connectOllama();
+      return;
+  }
+}
+
+/**
+ * Connects a key-based provider that can *also* be reached by signing in.
+ *
+ * When both are on the table the choice is the user's, because they trade off:
+ * a pasted key does not expire and keeps native tool calling, while signing in
+ * costs nothing. Providers with no verified sign-in path fall straight through
+ * to the key box, so this adds a question only where there is a real second
+ * answer to it.
+ */
+async function connectApiKeyProvider(id: ApiKeyProvider): Promise<void> {
+  if (!canCaptureSession(id)) {
+    await signInWithApiKey(id);
+    return;
+  }
+
+  const label = PROVIDER_LABELS[id];
+  const choice = await vscode.window.showQuickPick(
+    [
+      { label: "$(key) Paste an API key", detail: "Does not expire; keeps full tool calling.", method: "apiKey" as const },
+      { label: "$(globe) Sign in with a browser", detail: "Free; the session expires after a few hours.", method: "webSession" as const },
+    ],
+    { title: `Connect ${label}`, placeHolder: "How do you want to connect?" },
+  );
+  if (!choice) return;
+
+  if (choice.method === "apiKey") await signInWithApiKey(id);
+  else await signInWithSession(id);
 }
 
 /** Takes a key, checks it is plausible, and stores it in the keychain. */
@@ -560,7 +656,11 @@ async function signInWithApiKey(id: ApiKeyProvider): Promise<void> {
  * read what they are agreeing to first.
  */
 async function connectChatGptWeb(): Promise<void> {
-  const proceed = await vscode.window.showWarningMessage(
+  // Sign-in leads: capturing the token from a real login is the whole point of
+  // this provider now, and pasting it by hand is the fallback for when no
+  // browser can be driven. The paste path is preserved rather than removed
+  // because it still works when Playwright cannot find a Chrome to open.
+  const method = await vscode.window.showWarningMessage(
     "ChatGPT (web) drives your account through the undocumented endpoint the chatgpt.com page uses.",
     {
       modal: true,
@@ -572,9 +672,14 @@ async function connectChatGptWeb(): Promise<void> {
         "• If OpenAI's anti-automation check is active, IronBase will not work around it.\n\n" +
         "Ollama, Groq, Gemini, Kimi and Mistral all have free options that work properly.",
     },
-    "I understand — connect anyway",
+    "Sign in with a browser",
+    "Paste a token instead",
   );
-  if (proceed !== "I understand — connect anyway") return;
+  if (method === "Sign in with a browser") {
+    await signInWithSession("chatgpt-web");
+    return;
+  }
+  if (method !== "Paste a token instead") return;
 
   const token = await vscode.window.showInputBox({
     title: "ChatGPT (web) session token",
@@ -596,11 +701,204 @@ async function connectChatGptWeb(): Promise<void> {
   });
   if (!token) return;
 
-  await auth.setApiKey("chatgpt-web", token);
+  await auth.setWebSession("chatgpt-web", { token, capturedAt: Date.now() });
   await pinProvider("chatgpt-web");
   await refreshAuthState();
   void vscode.window.showInformationMessage(
     "Connected to ChatGPT (web). The token expires after a few hours — reconnect when reviews start failing with a rejected session.",
+  );
+}
+
+/**
+ * Connects a provider by capturing the session from a real sign-in.
+ *
+ * The acknowledgement comes first and names the specific provider's risk, held
+ * to the same standard the pasted-token flow has always used — this is the one
+ * class of provider that can get the user's own account suspended, so the person
+ * carrying that cost reads what they are agreeing to before a browser opens.
+ * There is no anti-automation workaround here: a challenge during sign-in is the
+ * user's to solve in the window that opened, because they are sitting at it.
+ */
+async function signInWithSession(id: ProviderId): Promise<void> {
+  const config = sessionConfigFor(id);
+  if (!config) {
+    void vscode.window.showWarningMessage(
+      `Signing in is not available for ${PROVIDER_LABELS[id]} yet. Connect it with an API key instead.`,
+    );
+    return;
+  }
+
+  const proceed = await vscode.window.showWarningMessage(
+    `Sign in to ${PROVIDER_LABELS[id]} in a browser window IronBase opens?`,
+    {
+      modal: true,
+      detail:
+        `${config.risk}\n\n` +
+        "IronBase opens your own browser to the sign-in page. Log in as you normally " +
+        "would — including any challenge, which you solve yourself — and it reads the " +
+        "session once you are through. Nothing about the browser is disguised.",
+    },
+    "Open the sign-in window",
+  );
+  if (proceed !== "Open the sign-in window") return;
+
+  const profileDir = vscode.Uri.joinPath(globalStorageUri, "browser-profile");
+  await vscode.workspace.fs.createDirectory(profileDir);
+
+  try {
+    if (config.transport === "browser") {
+      // The request will run inside this same browser later, so connecting is
+      // just confirming the login exists in the shared profile. Nothing is
+      // extracted; a marker records that the account is connected.
+      const ok = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Waiting for ${PROVIDER_LABELS[id]} sign-in…`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          const controller = new AbortController();
+          token.onCancellationRequested(() => controller.abort());
+          return browserSession.login(
+            config.loginUrl,
+            config.origin,
+            config.strategy.kind === "cookie" ? config.strategy.name : "",
+            controller.signal,
+          );
+        },
+      );
+      if (!ok) return;
+      await auth.setWebSession(id, { token: "browser-session", capturedAt: Date.now() });
+    } else {
+      const captured = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Waiting for ${PROVIDER_LABELS[id]} sign-in…`,
+          cancellable: true,
+        },
+        async (_progress, token) => {
+          const controller = new AbortController();
+          token.onCancellationRequested(() => controller.abort());
+          return captureWebSession(config, {
+            profileDir: profileDir.fsPath,
+            signal: controller.signal,
+          });
+        },
+      );
+      await auth.setWebSession(id, {
+        token: captured.token,
+        expiresAt: captured.expiresAt,
+        capturedAt: Date.now(),
+      });
+    }
+
+    await pinProvider(id);
+    await auth.setAuthMethodOverride(id, "webSession");
+    await refreshAuthState();
+    void vscode.window.showInformationMessage(
+      `Connected to ${PROVIDER_LABELS[id]}. The session expires after a few hours — sign in again when builds start failing with a rejected session.`,
+    );
+  } catch (err) {
+    if (err instanceof CaptureCancelledError) return;
+    if (err instanceof NoBrowserError) {
+      void vscode.window.showErrorMessage(err.message);
+      return;
+    }
+    void vscode.window.showErrorMessage(
+      `${PROVIDER_LABELS[id]} sign-in did not complete: ${describeError(err)}`,
+    );
+  }
+}
+
+/**
+ * Turns on the free, no-account provider.
+ *
+ * There is nothing to sign into, so the only thing "connecting" can mean is the
+ * user agreeing to where the traffic goes. That is worth asking once and plainly
+ * — the code being reviewed is what gets sent, and it leaves for a third party
+ * that nobody here has an account with.
+ */
+async function connectOpenCode(): Promise<void> {
+  const proceed = await vscode.window.showInformationMessage(
+    "OpenCode Free runs on models opencode.ai gives away, with no account and no key.",
+    {
+      modal: true,
+      detail:
+        "Worth knowing before you turn it on:\n\n" +
+        "• Your prompts and the code IronBase reads are sent to opencode.ai.\n" +
+        "• The free models are small — plans are rougher and tool use is less reliable than Claude or GPT.\n" +
+        "• The free lineup changes without notice, and quotas are shared.\n\n" +
+        "It is a real fallback for when a subscription runs out mid-task, not a replacement for one.",
+    },
+    "Turn it on",
+  );
+  if (proceed !== "Turn it on") return;
+
+  await auth.setFreeTierEnabled("opencode", true);
+  await pinProvider("opencode");
+  await refreshAuthState();
+  const models = await auth.listModels("opencode");
+  void vscode.window.showInformationMessage(
+    models.length > 0
+      ? `OpenCode Free is on (${models.length} free model(s) available).`
+      : "OpenCode Free is on.",
+  );
+}
+
+/**
+ * Points IronBase at a local router — 9Router, or anything else serving the
+ * OpenAI dialect on localhost.
+ *
+ * The router is the one that owns provider choice, fallback and quota once it
+ * is connected, so there is nothing to configure here beyond where it listens
+ * and, if its owner turned that on, the key it wants.
+ */
+async function connectRouter(): Promise<void> {
+  const base = getConfig().routerBaseUrl;
+  if (!(await auth.hasCredential("router"))) {
+    const choice = await vscode.window.showWarningMessage(
+      `Nothing is answering at ${base}. Start your router, then connect again.`,
+      "What is this?",
+      "Change the address",
+    );
+    if (choice === "What is this?") {
+      await vscode.env.openExternal(
+        vscode.Uri.parse(PROVIDER_SIGNUP.router ?? "https://github.com/decolua/9router"),
+      );
+    } else if (choice === "Change the address") {
+      await vscode.commands.executeCommand("workbench.action.openSettings", "ironbase.router");
+    }
+    return;
+  }
+
+  const models = await auth.listModels("router");
+  // An empty catalogue from a router that is plainly up almost always means it
+  // wants a key — worth offering rather than letting the first run 401.
+  if (models.length === 0) {
+    const choice = await vscode.window.showWarningMessage(
+      `The router at ${base} is up but listed no models. If it requires an API key, add it now.`,
+      "Add a key",
+      "Connect anyway",
+    );
+    if (choice === "Add a key") {
+      const key = await vscode.window.showInputBox({
+        title: "9Router API key",
+        prompt: "Paste the key from your router's dashboard. Leave empty if it does not need one.",
+        ignoreFocusOut: true,
+        password: true,
+      });
+      if (key !== undefined && key.trim().length > 0) await auth.setApiKey("router", key);
+    } else if (choice !== "Connect anyway") {
+      return;
+    }
+  }
+
+  await pinProvider("router");
+  await refreshAuthState();
+  void vscode.window.showInformationMessage(
+    models.length > 0
+      ? `IronBase is using the router at ${base} (${models.length} model(s) available).`
+      : `IronBase is using the router at ${base}.`,
   );
 }
 
@@ -1087,11 +1385,15 @@ async function reportError(err: unknown): Promise<void> {
     if (err.status === 401 || err.status === 403) {
       const active = await auth.getActiveClient();
       const label = active ? PROVIDER_LABELS[active.id] : "Your account";
-      // What "sign in again" means depends on how this provider authenticates:
-      // an expired OAuth session needs a new round trip, a rejected API key
-      // needs a new key. Sending a DeepSeek user into an Anthropic OAuth flow —
-      // which is what the old fallback did — could not have helped anyone.
-      const isKey = active !== undefined && PROVIDER_CREDENTIALS[active.id] === "apiKey";
+      // What "sign in again" means depends on how this provider is *currently*
+      // authenticated, which is now a runtime fact rather than a provider
+      // constant: the same account can be on a pasted key or a captured session,
+      // and a rejected session needs a fresh sign-in, not a key box. Sending a
+      // DeepSeek user into an Anthropic OAuth flow — which the old fallback did —
+      // could not have helped anyone.
+      const method = active ? (await auth.resolveCredential(active.id))?.method : undefined;
+      const isKey = method === "apiKey";
+      const isSession = method === "webSession";
       const choice = await vscode.window.showErrorMessage(
         isKey
           ? `${label} rejected the API key.`
@@ -1101,7 +1403,11 @@ async function reportError(err: unknown): Promise<void> {
       );
       if (choice === "Sign in again" || choice === "Enter a new key") {
         if (active === undefined) await connectAccount();
+        else if (isSession) await signInWithSession(active.id);
         else if (active.id === "chatgpt-web") await connectChatGptWeb();
+        // A router authenticates like a local server, so a 401 from one means
+        // its owner turned on REQUIRE_API_KEY — which is what this flow asks for.
+        else if (active.id === "router") await connectRouter();
         else if (isKey) await signInWithApiKey(active.id as ApiKeyProvider);
         else if (active.id === "chatgpt-oauth") await signInOpenAi();
         else if (active.id === "gemini-oauth") await signInGoogle();

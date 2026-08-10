@@ -22,6 +22,19 @@ const TOKENS = `
   --accent: var(--vscode-textLink-foreground, #3b9eff);
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
 
+  /* Brand — a fixed identity, deliberately NOT derived from the editor theme.
+     This is the one exception to the rule at the top of this file, and it is
+     scoped: only the surfaces IronBase owns outright — the sign-in hero, the
+     wordmark, the primary connect action — reach for these. Everything that
+     shows the user's own code stays theme-derived so it still reads natively.
+     The pair holds its contrast on light and dark alike, which is why the
+     identity can be a constant rather than two. */
+  --brand-1: #7b6cff;
+  --brand-2: #c15cff;
+  --brand-accent: #8a7bff;
+  --brand-contrast: #ffffff;
+  --brand-soft: color-mix(in srgb, var(--brand-1) 15%, transparent);
+
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -905,19 +918,130 @@ p { margin: 0 0 10px; }
 
 /* ---- Sign-in ---- */
 
-.welcome { text-align: center; padding: 10px 0 16px; }
-.welcome .mark-row { display: flex; justify-content: center; gap: 10px; margin-bottom: 12px; }
-.welcome .mark-row > * {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+/* The hero owns its surface: a fixed brand look rather than the editor theme,
+   because this is the three-second first impression and it should read as a
+   product, not a panel. */
+.hero {
+  text-align: center;
+  padding: 20px 6px 22px;
+  position: relative;
+}
+.hero::before {
+  /* A soft brand glow behind the mark, so the identity has presence without a
+     background image the CSP would block anyway. */
+  content: "";
+  position: absolute;
+  inset: -8% 18% auto;
+  height: 130px;
+  background: radial-gradient(58% 100% at 50% 0, var(--brand-soft), transparent 72%);
+  pointer-events: none;
+}
+/* The mark: a rounded tile carrying the one gradient, the white glyph on top. */
+.brand-tile {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  box-shadow: 0 10px 26px -10px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.wordmark {
+  display: inline-flex;
+  font-weight: 750;
+  font-size: 18px;
+  letter-spacing: 0.24em;
+  /* Flat and monochrome: the gradient lives on the mark alone, so the identity
+     is one accent, not two competing ones. The tracked second half stays a hair
+     lighter to keep the two words legible as one lockup. */
+  margin-bottom: 16px;
+  margin-left: 0.24em;
+}
+.wordmark .w1 { color: var(--ink); }
+.wordmark .w2 { color: var(--ink-muted); }
+.hero h1 {
+  font-size: 17px;
+  font-weight: 650;
+  line-height: 1.32;
+  letter-spacing: -0.02em;
+  margin: 0 auto 10px;
+  max-width: 21ch;
+}
+.hero .lede {
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0 auto;
+  max-width: 31ch;
+}
+
+/* ---- Connect matrix ---- */
+
+.connect-grid { display: flex; flex-direction: column; gap: 7px; }
+
+.connect {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  transition: border-color 140ms ease, background 140ms ease;
+}
+.connect:hover { border-color: var(--hairline-strong); background: var(--surface-raised); }
+.connect .mark {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--surface-raised);
   border: 1px solid var(--hairline);
 }
-.welcome h1 { font-size: 15px; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; }
+.connect .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.connect .name { font-weight: 600; }
+.connect .detail { color: var(--ink-muted); font-size: 11px; line-height: 1.4; }
+.connect .methods { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+button.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 550;
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink);
+  background: transparent;
+}
+button.chip:hover { background: var(--surface-raised); border-color: var(--brand-accent); }
+button.chip.primary {
+  border-color: transparent;
+  color: var(--brand-contrast);
+  background: linear-gradient(100deg, var(--brand-1), var(--brand-2));
+}
+button.chip.primary:hover { filter: brightness(1.08); transform: translateY(-0.5px); }
+
+.more { margin: 10px 0 0; }
+.more > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink-muted);
+  font-size: 11.5px;
+  padding: 7px 2px;
+}
+.more > summary::-webkit-details-marker { display: none; }
+.more > summary .chev { transition: transform 140ms ease; flex: 0 0 auto; }
+.more[open] > summary .chev { transform: rotate(90deg); }
+.more .connect-grid { margin-top: 6px; }
 
 .account {
   display: flex;

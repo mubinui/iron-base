@@ -587,5 +587,9 @@ export const PROVIDER_ICONS: Record<string, IconName> = {
   mistral: "mistral",
   kimi: "kimi",
   deepseek: "deepseek",
+  // Neither has a brand mark worth reproducing at 19px, so both borrow a
+  // generic one that says what they are: a hop, and a terminal.
+  router: "plug",
+  opencode: "terminal",
   ollama: "server",
 };

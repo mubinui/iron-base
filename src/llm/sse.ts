@@ -83,6 +83,43 @@ export async function throwHttpError(response: Response): Promise<never> {
   );
 }
 
+/**
+ * Whether a body is an HTML document rather than the JSON we asked for.
+ *
+ * This is the shape a Cloudflare interstitial, a login wall, or an SPA's
+ * 404-fallback `index.html` takes — all of which a provider can return with a
+ * 200 status, which is exactly why checking `response.ok` is not enough. Catching
+ * it here is what turns `Unexpected token '<', "<!DOCTYPE"…` — a raw parser error
+ * the user can do nothing with — into a sentence that names what happened.
+ */
+export function looksLikeHtml(body: string): boolean {
+  return /^\s*(<!doctype html|<html[\s>]|<head[\s>]|<!--)/i.test(body);
+}
+
+/**
+ * Reads a response body as JSON, or fails with an error worth reading.
+ *
+ * `response.json()` throws a bare `SyntaxError` the instant a body is not JSON,
+ * and at a provider boundary that body is routinely an HTML challenge page rather
+ * than the API's own error envelope. This reads the text once, and on a parse
+ * failure raises an `LlmHttpError` that says whether it looked like an
+ * anti-automation page and quotes a short snippet — so the failure is
+ * diagnosable instead of cryptic. `label` names the provider in that message.
+ */
+export async function readJsonBody<T>(response: Response, label: string): Promise<T> {
+  const body = await response.text().catch(() => "");
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    const snippet = body.trim().slice(0, 200).replace(/\s+/g, " ");
+    const reason = looksLikeHtml(body)
+      ? `${label} returned an HTML page instead of JSON — usually an anti-automation ` +
+        `challenge or a signed-out session, not the API.`
+      : `${label} returned a response that was not JSON.`;
+    throw new LlmHttpError(response.status, `${reason}${snippet ? ` (${snippet}…)` : ""}`);
+  }
+}
+
 /** Bridges a VS Code CancellationToken to fetch's AbortSignal. */
 export function abortSignalFor(token: CancelToken): {
   signal: AbortSignal;

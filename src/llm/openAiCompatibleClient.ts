@@ -29,6 +29,13 @@ export interface OpenAiCompatibleOptions {
    * Absent for a local server that does not check one.
    */
   getApiKey?: () => Promise<string | undefined>;
+  /**
+   * Sent on every request to this backend. For endpoints that want a fixed
+   * header rather than a secret — OpenCode's free tier identifies its client
+   * and takes the literal bearer "public", neither of which is a credential.
+   * A resolved `getApiKey` still wins, so a key can be layered on top.
+   */
+  headers?: Record<string, string>;
   /** Shown in errors so the user knows which backend refused. */
   label: string;
   /**
@@ -59,6 +66,7 @@ export class OpenAiCompatibleClient implements LlmClient {
     const headers: Record<string, string> = {
       "content-type": "application/json",
       accept: "text/event-stream",
+      ...this.options.headers,
     };
     const apiKey = await this.options.getApiKey?.();
     if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
@@ -268,13 +276,24 @@ function describeConnectionFailure(err: unknown, options: OpenAiCompatibleOption
 export async function listOpenAiCompatibleModels(
   baseUrl: string,
   apiKey?: string,
+  extraHeaders?: Record<string, string>,
 ): Promise<string[]> {
-  const headers: Record<string, string> = { accept: "application/json" };
+  const headers: Record<string, string> = { accept: "application/json", ...extraHeaders };
   if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
 
   const response = await fetch(`${baseUrl}/models`, { method: "GET", headers });
   if (!response.ok) return [];
-  const json = (await response.json()) as { data?: Array<{ id?: unknown }> };
+  // A model list is best-effort — the caller falls back to a default when it
+  // comes back empty — so a body that is not JSON (an HTML page served with a
+  // 200, which `response.ok` does not catch) means "offer nothing" rather than
+  // a thrown parser error. `response.ok` alone is not enough of a guard here.
+  const body = await response.text().catch(() => "");
+  let json: { data?: Array<{ id?: unknown }> };
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return [];
+  }
   return (json.data ?? [])
     .map((entry) => entry.id)
     .filter((id): id is string => typeof id === "string" && id.length > 0)

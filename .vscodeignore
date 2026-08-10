@@ -3,6 +3,9 @@ src/**
 webview/**
 test-fixtures/**
 node_modules/**
+# playwright-core is required at runtime (esbuild marks it external), so its
+# files have to ship even though everything else in node_modules is bundled in.
+!node_modules/playwright-core/**
 out/**
 esbuild.mjs
 tsconfig.json

@@ -11,7 +11,10 @@ const extensionConfig = {
   platform: "node",
   target: "node18",
   outfile: "dist/extension.js",
-  external: ["vscode"],
+  // playwright-core does dynamic requires and spawns a browser binary; bundling
+  // it inline breaks both. It ships in the .vsix via `dependencies` and is
+  // required from node_modules at runtime, loaded only when a capture starts.
+  external: ["vscode", "playwright-core"],
   sourcemap: !production,
   minify: production,
   logLevel: "info",

@@ -15,6 +15,7 @@
 import * as vscode from "vscode";
 import type { ChatController, ChatSurface } from "../chat/chatController";
 import { html as chatHtml } from "../chat/chatPanel";
+import { ALL_PROVIDERS, supportsMethod, type ProviderId } from "../llm/types";
 import {
   isAllowedCommand,
   type ChatHostMessage,
@@ -24,6 +25,11 @@ import {
   type WebviewMessage,
 } from "../protocol";
 import { log } from "../util/log";
+
+/** Narrows an untrusted string off the message channel to a real provider id. */
+function isProvider(value: unknown): value is ProviderId {
+  return typeof value === "string" && (ALL_PROVIDERS as string[]).includes(value);
+}
 import { createNonce } from "./reportPanel";
 import { SIDEBAR_STYLES } from "./styles";
 
@@ -173,6 +179,24 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
         void vscode.commands.executeCommand(message.command);
       } else {
         log.warn(`Sidebar asked for a command outside the allowlist: ${message.command}`);
+      }
+    } else if (message.type === "connectProvider") {
+      // The provider and method come off a channel that also carries
+      // model-generated content on other surfaces, so both are checked against
+      // the real matrix before anything is dispatched — a bad pair is dropped,
+      // not guessed at.
+      if (isProvider(message.id) && supportsMethod(message.id, message.method)) {
+        void vscode.commands.executeCommand(
+          "ironbase.internal.connect",
+          message.id,
+          message.method,
+        );
+      } else {
+        log.warn(`Sidebar asked to connect an unknown pair: ${message.id}/${message.method}`);
+      }
+    } else if (message.type === "disconnectProvider") {
+      if (isProvider(message.id)) {
+        void vscode.commands.executeCommand("ironbase.signOutProvider", message.id);
       }
     }
   }

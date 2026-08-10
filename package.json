@@ -212,6 +212,8 @@
             "mistral",
             "kimi",
             "deepseek",
+            "router",
+            "opencode",
             "ollama"
           ],
           "enumDescriptions": [
@@ -227,6 +229,8 @@
             "Mistral (API key, free tier included)",
             "Kimi (Moonshot API key, free tier included)",
             "DeepSeek (API key, pay as you go)",
+            "9Router (local router — every account you connected there)",
+            "OpenCode Free (no account, no key; free models, lower quality)",
             "Ollama (models on this machine, no account)"
           ],
           "default": "auto",
@@ -401,6 +405,8 @@
               "mistral",
               "kimi",
               "deepseek",
+              "router",
+              "opencode",
               "ollama"
             ]
           },
@@ -411,6 +417,11 @@
           "type": "string",
           "default": "http://127.0.0.1:11434/v1",
           "description": "Where the local Ollama server listens. Change this if you moved it off the default port."
+        },
+        "ironbase.router.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:20128/v1",
+          "markdownDescription": "Where your local router listens. Defaults to [9Router](https://github.com/decolua/9router)'s port; any server that speaks the OpenAI chat-completions dialect works here."
         },
         "ironbase.autoFailover": {
           "type": "boolean",
@@ -429,7 +440,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "ignore": "^5.3.1"
+    "ignore": "^5.3.1",
+    "playwright-core": "^1.62.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

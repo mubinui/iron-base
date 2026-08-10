@@ -26,6 +26,8 @@ export interface IronBaseConfig {
   googleClientSecret: string;
   /** Where the local model server listens. */
   ollamaBaseUrl: string;
+  /** Where a local router (9Router or anything OpenAI-shaped) listens. */
+  routerBaseUrl: string;
   /** Continue on another connected account when one is rate limited. */
   autoFailover: boolean;
 }
@@ -53,6 +55,10 @@ export function getConfig(): IronBaseConfig {
     googleClientSecret: c.get<string>("google.clientSecret", "").trim(),
     ollamaBaseUrl: c
       .get<string>("ollama.baseUrl", OPENAI_COMPATIBLE_BASES.ollama)
+      .trim()
+      .replace(/\/+$/, ""),
+    routerBaseUrl: c
+      .get<string>("router.baseUrl", OPENAI_COMPATIBLE_BASES.router)
       .trim()
       .replace(/\/+$/, ""),
     autoFailover: c.get<boolean>("autoFailover", true),
