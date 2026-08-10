@@ -1643,7 +1643,14 @@ button.meter.changed { color: var(--sev-medium); }
   padding: var(--space-2) var(--space-4) var(--space-4);
   background: var(--vscode-editor-background);
 }
-.composer .inner { max-width: 60rem; margin-inline: auto; min-width: 0; }
+.composer .inner {
+  max-width: 60rem;
+  margin-inline: auto;
+  min-width: 0;
+  /* The bar below collapses its labels against *this* width, not the window's:
+     a docked sidebar is narrow no matter how wide the screen is. */
+  container: composer / inline-size;
+}
 
 .composer-box {
   position: relative;
@@ -1678,13 +1685,32 @@ button.meter.changed { color: var(--sev-medium); }
 
 .composer-bar {
   display: flex;
-  flex-wrap: wrap;
+  /* Never wrap. The send button is the last child, so wrapping is what dropped
+     it onto a line of its own when the box got tight. Held on one line, the
+     shrinkable items (the spacer, then the model name) give up their width
+     first, and the labels collapse to icons below — the round button stays put. */
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
   padding: 0.4rem 0.5rem 0.5rem;
   min-width: 0;
 }
 .composer-bar .spacer { flex: 1 1 auto; min-width: 0; }
+
+/*
+ * Narrow composer: spend the words, keep the marks. Each chip still carries its
+ * icon and its tooltip, so nothing becomes unreachable — it just stops paying
+ * for a label there is no room for. Two steps: drop the setting labels first,
+ * then the model name, so the round send button never has to leave the row.
+ */
+@container composer (max-width: 360px) {
+  .composer-bar .bar-chip span { display: none; }
+  .composer-bar .bar-chip { padding: 0.3rem; }
+}
+@container composer (max-width: 300px) {
+  .composer-bar .model-pick > span { display: none; }
+  .composer-bar .model-pick { padding: 0.3rem; }
+}
 
 /* A chip is a setting you can see and change without leaving the box. */
 .bar-chip {
