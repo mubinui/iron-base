@@ -849,6 +849,20 @@ export class ChatController {
           log.warn(`Build panel asked for a command outside the allowlist: ${message.command}`);
         }
         break;
+      default: {
+        // Silence here is how a stale extension host presents. Installing an
+        // update while VS Code is running replaces dist/ on disk but does not
+        // restart the host: the webview reloads its script and draws the new
+        // control, the host keeps running the old code, and the message the
+        // new control sends matches no case and vanishes. That looks exactly
+        // like a dead button, which is the one thing it must not look like.
+        const type = (message as { type?: string }).type;
+        log.warn(
+          `Build panel sent "${type}", which this version of the extension does not handle. ` +
+            "If the panel was updated while the window was open, reload the window.",
+        );
+        break;
+      }
     }
   }
 
