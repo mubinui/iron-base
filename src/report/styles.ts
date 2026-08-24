@@ -1504,6 +1504,25 @@ ${TOKENS}
 ${BUTTONS}
 ${SIGN_IN}
 
+/*
+ * The conversation runs at higher contrast than the rest of the product.
+ *
+ * A theme's foreground is tuned for code, where syntax colour carries meaning
+ * and the plain text around it is deliberately soft. This panel is prose, read
+ * at length, and the same grey reads as washed out. The theme's own colour is
+ * kept and deepened toward the far end of its own ground, so a warm theme
+ * stays warm — rather than swapped for a flat black that would fight it.
+ *
+ * VS Code stamps these classes on the webview body, which is the only way a
+ * stylesheet can tell which way "further from the background" points.
+ */
+body.vscode-light { --ink: color-mix(in srgb, var(--vscode-foreground) 74%, #000); }
+body.vscode-dark,
+body.vscode-high-contrast { --ink: color-mix(in srgb, var(--vscode-foreground) 74%, #fff); }
+/* Secondary text follows the primary rather than the raw theme value, so the
+   step between them stays the same size wherever the primary lands. */
+body { --ink-muted: color-mix(in srgb, var(--ink) 84%, transparent); }
+
 /* The shared button and sign-in blocks are written at the sidebar's scale.
    The conversation is read, not scanned, so it runs a step larger — and a
    12px button label under 15px prose reads as a mistake. */
