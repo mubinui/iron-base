@@ -45,6 +45,7 @@ import { canCaptureSession } from "../llm/webSessions";
 import { describeError, log } from "../util/log";
 import * as path from "node:path";
 import { relativeTo, resolveInside } from "../util/paths";
+import { NOISE_GLOB } from "../engine/tools";
 import {
   type ChatHostMessage,
   type ChatState,
@@ -889,6 +890,41 @@ export class ChatController {
    * something that silently fails on the first read.
    */
   private async pickFiles(): Promise<void> {
+    // A quick pick rather than the native dialog. The dialog is a separate
+    // window, and one opened from a focused webview can end up behind VS Code
+    // on macOS — which looks exactly like a button that does nothing. This
+    // renders inside the editor, is searchable, and is scoped to the workspace
+    // by construction, which is the same fence every read tool sits behind.
+    const found = await vscode.workspace.findFiles(
+      new vscode.RelativePattern(this.folder, "**/*"),
+      NOISE_GLOB,
+      4000,
+    );
+    const items: Array<vscode.QuickPickItem & { file?: string }> = found
+      .map((uri) => relativeTo(this.folder.uri, uri))
+      .filter((rel) => !rel.startsWith("..") && !path.isAbsolute(rel))
+      .sort((a, b) => a.localeCompare(b))
+      .map((rel) => ({ label: path.basename(rel), description: path.dirname(rel), file: rel }));
+
+    const BROWSE = "$(folder-opened)  Browse…";
+    const chosen = await vscode.window.showQuickPick(
+      [{ label: BROWSE, detail: "Pick from anywhere on disk" }, ...items],
+      {
+        canPickMany: true,
+        matchOnDescription: true,
+        placeHolder: `Attach files from ${this.folder.name} — type to filter, Space to select`,
+      },
+    );
+    if (!chosen || chosen.length === 0) return;
+
+    const quick = chosen.map((item) => item.file).filter((f): f is string => f !== undefined);
+    if (quick.length > 0) {
+      this.post({ type: "filesPicked", files: quick });
+      log.info(`Attach: ${quick.join(", ")}`);
+    }
+    if (!chosen.some((item) => item.label === BROWSE)) return;
+
+    // The escape hatch, for a file the index has not seen yet.
     let picked: vscode.Uri[] | undefined;
     try {
       picked = await vscode.window.showOpenDialog({

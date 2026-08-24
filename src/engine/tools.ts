@@ -50,6 +50,15 @@ export interface ReportSubmission {
   scalability?: ScalabilityAnalysis;
 }
 
+/**
+ * Directories nobody means when they say "a file in this project".
+ *
+ * Shared with the attach picker so the two agree: a list that offers 40,000
+ * node_modules entries is a list nobody can use.
+ */
+export const NOISE_GLOB =
+  "{**/node_modules/**,**/dist/**,**/build/**,**/.git/**,**/out/**,**/vendor/**,**/coverage/**}";
+
 export interface ToolOutcome {
   content: string;
   isError?: boolean;
@@ -282,7 +291,7 @@ export class ToolRunner {
 
     const files = await vscode.workspace.findFiles(
       new vscode.RelativePattern(this.ctx.root, glob ?? "**/*"),
-      "{**/node_modules/**,**/dist/**,**/build/**,**/.git/**,**/out/**,**/vendor/**,**/coverage/**}",
+      NOISE_GLOB,
       MAX_FILES_SCANNED,
       this.ctx.token,
     );
