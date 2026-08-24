@@ -40,6 +40,16 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
 
   private view: vscode.WebviewView | undefined;
   private screen: SidebarScreen = "home";
+  /**
+   * Whether the build screen has already been offered on its own.
+   *
+   * Signed in, the conversation is what someone came for, so the panel opens
+   * there rather than on a menu they have to click through every time. Once
+   * they have deliberately gone back to the account screen — or been sent
+   * there once — this stays true, or Back would bounce them straight forward
+   * again and the button would look broken.
+   */
+  private autoOpened = false;
   private controller: ChatController | undefined;
   private state: SidebarState = {
     providerLabel: undefined,
@@ -48,7 +58,15 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
     fixCount: 0,
   };
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  /**
+   * `openBuild` is how this view reaches the conversation without knowing what
+   * building one costs — the controller needs a workspace, an index and an
+   * account, and all three are the extension host's business, not a webview's.
+   */
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly openBuild: () => void,
+  ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -64,6 +82,15 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
       this.onMessage(message),
     );
     this.renderScreen();
+    this.maybeOpenBuild();
+  }
+
+  /** Straight to the conversation when there is an account to run it on. */
+  private maybeOpenBuild(): void {
+    if (this.autoOpened || this.screen !== "home") return;
+    if (!this.state.providerLabel || this.state.running) return;
+    this.autoOpened = true;
+    this.openBuild();
   }
 
   // --- Screens ---------------------------------------------------------------
@@ -84,6 +111,8 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
   }
 
   showHome(): void {
+    // Asked for by name, so it is a destination now rather than a waypoint.
+    this.autoOpened = true;
     if (this.screen === "home") return;
     this.detachController();
     this.screen = "home";
@@ -137,6 +166,9 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
 
   setState(patch: Partial<SidebarState>): void {
     this.state = { ...this.state, ...patch };
+    // Sign-in resolves after the view is already up, so this is usually the
+    // moment the panel learns it has an account to build with.
+    this.maybeOpenBuild();
     // Only the home screen draws this. Posting it to the build page would be
     // a message it has no case for.
     if (this.screen === "home") this.post({ type: "state", state: this.state });

@@ -68,7 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   auth.attachBrowserSession(browserSession);
   context.subscriptions.push({ dispose: () => void browserSession.dispose() });
-  sidebar = new SidebarView(context.extensionUri);
+  sidebar = new SidebarView(context.extensionUri, () => void openBuildPanel());
   diagnostics = new DiagnosticsPublisher(context);
 
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);

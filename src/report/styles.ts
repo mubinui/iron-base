@@ -1447,6 +1447,37 @@ body {
   white-space: nowrap;
 }
 .head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+
+/*
+ * The way back to the accounts screen.
+ *
+ * The panel opens straight into the conversation once an account is
+ * connected, so this is the only route to where accounts are added and
+ * switched. It is drawn as a raised control rather than another flat glyph:
+ * the brand tint on hover is the same one the mark wears, which is what makes
+ * it read as "back to IronBase" rather than "previous message".
+ */
+.back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  color: var(--ink-muted);
+  border: 1px solid var(--hairline);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+  transition: color 140ms ease, border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+.back-btn:hover {
+  color: var(--brand-contrast);
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  transform: translateX(-1px);
+}
+.back-btn:active { transform: translateX(-1px) translateY(0.5px); }
 .chat-head svg { flex: 0 0 auto; }
 
 .mode-chip {

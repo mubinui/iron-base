@@ -238,13 +238,18 @@ function renderHead(): void {
 
   const top = el("div", undefined, "head-row");
 
-  // Back to the account/review screen. The build lives in the sidebar now, so
-  // there has to be a way out of it that is not "close the whole view".
-  top.append(
-    iconButton("Back", "chevron", () =>
-      vscode.postMessage({ type: "command", command: "ironbase.buildHome" }),
-    ),
+  // Back to the accounts screen. The panel opens straight into the
+  // conversation when an account is connected, so this is the only route to
+  // the place where accounts are added and switched — which is why it is a
+  // marked control rather than one more grey glyph in a row of them.
+  const back = el("button", undefined, "back-btn");
+  back.title = "Accounts, reviews and past builds";
+  back.setAttribute("aria-label", "Back to accounts");
+  back.append(icon("back", 15));
+  back.addEventListener("click", () =>
+    vscode.postMessage({ type: "command", command: "ironbase.buildHome" }),
   );
+  top.append(back);
 
   const chip = el("span", undefined, `mode-chip ${state.agent}`);
   chip.append(

@@ -52,6 +52,7 @@ export type IconName =
   | "check"
   | "alert"
   | "chevron"
+  | "back"
   | "file"
   | "folder"
   | "layers"
@@ -443,6 +444,18 @@ const GLYPHS: Record<IconName, Glyph> = {
   chevron: {
     box: 24,
     strokes: ["M9 5 L16 12 L9 19"],
+  },
+  /**
+   * Back to the accounts screen.
+   *
+   * An arrow rather than the bare chevron this used to borrow — which pointed
+   * *right*, the one direction a back control must not. The stem is what makes
+   * it read as "return to" instead of "previous item".
+   */
+  back: {
+    box: 24,
+    strokes: ["M20 12 H5", "M11.5 5.5 L5 12 L11.5 18.5"],
+    width: 1.9,
   },
   file: {
     box: 24,
