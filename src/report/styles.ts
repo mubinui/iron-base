@@ -56,7 +56,13 @@ const TOKENS = `
   --radius-xl: 20px;
 
   --ink: var(--vscode-foreground);
-  --ink-muted: var(--vscode-descriptionForeground);
+  /*
+   * Secondary text, as a fixed share of the theme's own foreground rather than
+   * its descriptionForeground, which varies enough between themes that
+   * "muted" landed anywhere from comfortable to 2.3:1. This is a known step
+   * down from --ink, and it clears AA on both a light and a dark ground.
+   */
+  --ink-muted: color-mix(in srgb, var(--vscode-foreground) 86%, transparent);
   --surface: color-mix(in srgb, var(--vscode-editor-foreground) 3.5%, var(--vscode-editor-background));
   --surface-raised: color-mix(in srgb, var(--vscode-editor-foreground) 7%, var(--vscode-editor-background));
   --surface-sunken: color-mix(in srgb, var(--vscode-editor-foreground) 1.5%, var(--vscode-editor-background));
@@ -1801,7 +1807,7 @@ button.meter.changed { color: var(--sev-medium); }
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  opacity: 0.75;
+  opacity: 0.9;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1811,7 +1817,7 @@ button.meter.changed { color: var(--sev-medium); }
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink);
-  opacity: 0.82;
+  opacity: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1821,7 +1827,7 @@ button.meter.changed { color: var(--sev-medium); }
 .trace-row .note {
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
-  opacity: 0.6;
+  opacity: 0.85;
   white-space: nowrap;
 }
 .trace-row.bad .note { color: var(--sev-critical); opacity: 1; }
@@ -1970,7 +1976,7 @@ button.meter.changed { color: var(--sev-medium); }
   text-align: right;
   padding-right: var(--space-2);
   color: var(--ink-muted);
-  opacity: 0.55;
+  opacity: 0.85;
   user-select: none;
   font-variant-numeric: tabular-nums;
   background: inherit;
