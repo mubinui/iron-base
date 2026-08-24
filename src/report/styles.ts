@@ -1122,6 +1122,82 @@ h2:first-child { margin-top: 0; }
 p { margin: 0 0 10px; }
 .muted { color: var(--ink-muted); font-size: 11.5px; line-height: 1.5; }
 
+/* ---- Signed-in home ---- */
+/*
+ * The mark, small, above the day-to-day actions. Signed in, this screen is
+ * opened every day; it identifies itself and then gets out of the way.
+ */
+.home-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-bottom: 16px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--hairline);
+}
+.home-head .brand-tile {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  margin: 0;
+  box-shadow: 0 5px 14px -6px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+.home-head .wordmark { margin: 0; font-size: 13px; letter-spacing: 0.2em; }
+
+/* One thing it can do, and the sentence that says why you would press it. */
+.tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 12px 13px;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--surface);
+  color: var(--ink);
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+.tile:hover {
+  background: var(--surface-raised);
+  border-color: color-mix(in srgb, var(--brand-accent) 55%, transparent);
+}
+.tile:active { transform: translateY(0.5px); }
+.tile .mark {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: var(--brand-accent);
+  border: 1px solid color-mix(in srgb, var(--brand-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--brand-accent) 11%, transparent);
+}
+.tile .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.tile .name { font-weight: 600; font-size: 13px; letter-spacing: -0.005em; }
+.tile .line { color: var(--ink-muted); font-size: 11.5px; line-height: 1.42; }
+.tile .go { flex: 0 0 auto; color: var(--ink-muted); opacity: 0.5; margin-top: 8px; }
+.tile:hover .go { opacity: 1; color: var(--brand-accent); }
+
+/* The one action the screen exists for. */
+.tile.primary {
+  border-color: transparent;
+  color: var(--brand-contrast);
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  box-shadow: 0 10px 24px -12px var(--brand-1);
+}
+.tile.primary:hover { filter: brightness(1.06); border-color: transparent; }
+.tile.primary .mark {
+  color: var(--brand-contrast);
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.17);
+}
+.tile.primary .line { color: rgba(255, 255, 255, 0.85); }
+.tile.primary .go { color: var(--brand-contrast); opacity: 0.8; }
+.tile.primary:hover .go { color: var(--brand-contrast); opacity: 1; }
+
 .account {
   display: flex;
   align-items: center;

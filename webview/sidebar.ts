@@ -13,7 +13,15 @@ import {
   type ProviderId,
 } from "../src/llm/types";
 import type { AllowedCommand, HostMessage, SidebarState, WebviewMessage } from "../src/protocol";
-import { capabilityList, connectMatrix, hero, keychainFootnote, pricingNote } from "./brand";
+import {
+  brandMark,
+  capabilityList,
+  connectMatrix,
+  hero,
+  keychainFootnote,
+  pricingNote,
+  wordmark,
+} from "./brand";
 import { icon, PROVIDER_ICONS, type IconName } from "./icons";
 
 declare function acquireVsCodeApi(): { postMessage(message: WebviewMessage): void };
@@ -201,21 +209,45 @@ function connected(state: SidebarState): HTMLElement[] {
   if (state.running) return running(state);
 
   const out: HTMLElement[] = [];
+
+  // The mark, small. Signed in, this is the screen someone opens every day, so
+  // it identifies itself and gets out of the way rather than re-pitching the
+  // product at them — that job belongs to the signed-out screen.
+  const head = el("div", undefined, "home-head");
+  head.append(brandMark(17), wordmark());
+  out.push(head);
+
   // Build leads: reviewing tells you what is wrong, building is what fixes it,
-  // and the panel it opens is where someone spends their time.
-  out.push(el("h2", "Build"));
-  out.push(actionButton("Build something…", "wrench", "ironbase.build"));
+  // and the panel it opens is where someone spends their time. Each of the
+  // three says what it does, because "Analyze architecture" and "Scalability
+  // check" were bare buttons that gave no reason to press either.
   out.push(
-    el(
-      "p",
-      "Describe a change. IronBase plans it against the project map, you approve the plan, then it writes the code and runs your tests.",
-      "muted",
+    actionTile(
+      "Build something",
+      "Describe a change. It plans against the project map, you approve, then it writes the code and runs your tests.",
+      "wrench",
+      "ironbase.build",
+      "primary",
     ),
   );
 
-  out.push(el("h2", "Review"));
-  out.push(actionButton("Analyze architecture", "play", "ironbase.analyze", "ghost"));
-  out.push(actionButton("Scalability check…", "gauge", "ironbase.scalabilityCheck", "ghost"));
+  out.push(el("h2", "Review the whole project"));
+  out.push(
+    actionTile(
+      "Analyze architecture",
+      "What will hurt as this grows — each with a real file and line, on a dependency map.",
+      "graph",
+      "ironbase.analyze",
+    ),
+  );
+  out.push(
+    actionTile(
+      "Scalability check",
+      "Name the load you want to serve; it ranks what caps you today and plans the way up.",
+      "trend",
+      "ironbase.scalabilityCheck",
+    ),
+  );
 
   if (state.lastSummary) {
     out.push(el("h2", "Last review"));
@@ -380,6 +412,31 @@ function el(tag: string, text?: string, className?: string): HTMLElement {
   if (text !== undefined) node.textContent = text;
   if (className) node.className = className;
   return node;
+}
+
+/**
+ * One thing IronBase can do, with the sentence that explains why you would.
+ *
+ * The mark carries the colour and the arrow says it goes somewhere; the body
+ * is what a bare button could not say.
+ */
+function actionTile(
+  title: string,
+  line: string,
+  glyph: IconName,
+  command: AllowedCommand,
+  variant: "primary" | "ghost" = "ghost",
+): HTMLElement {
+  const tile = el("button", undefined, `tile${variant === "primary" ? " primary" : ""}`);
+  const mark = el("span", undefined, "mark");
+  mark.append(icon(glyph, 17));
+  const body = el("span", undefined, "body");
+  body.append(el("span", title, "name"), el("span", line, "line"));
+  const go = el("span", undefined, "go");
+  go.append(icon("chevron", 13));
+  tile.append(mark, body, go);
+  tile.addEventListener("click", () => vscode.postMessage({ type: "command", command }));
+  return tile;
 }
 
 function actionButton(
