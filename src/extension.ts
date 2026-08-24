@@ -113,6 +113,13 @@ export function activate(context: vscode.ExtensionContext): void {
       "ironbase.internal.connect",
       (id: ProviderId, method: AuthMethod) => connectWithMethod(id, method),
     ),
+    // Likewise for the two whole-workspace runs started from the build
+    // composer's mode menu, which carry the load description with them rather
+    // than going through the modal input box the palette entry uses.
+    vscode.commands.registerCommand(
+      "ironbase.internal.review",
+      (kind: unknown, target: unknown) => startReviewFromPanel(kind, target),
+    ),
   );
 
   void refreshAuthState();
@@ -269,6 +276,31 @@ function openBuildInEditor(): void {
 }
 
 // --- Analysis runs ---------------------------------------------------------
+
+/**
+ * The composer's route into a review run.
+ *
+ * The kind arrives off a webview channel, so it is matched rather than cast; an
+ * unrecognised one is dropped. A scalability check with nothing to aim at falls
+ * back to the modal prompt instead of running against a blank target, which is
+ * what someone who picked the mode and pressed send with an empty box meant.
+ */
+async function startReviewFromPanel(kind: unknown, target: unknown): Promise<void> {
+  if (kind === "review") {
+    await startRun({ kind: "review" });
+    return;
+  }
+  if (kind !== "scalability") {
+    log.warn(`Build panel asked for an unknown review kind: ${String(kind)}`);
+    return;
+  }
+  const brief = typeof target === "string" ? target.trim() : "";
+  if (brief.length === 0) {
+    await startScalabilityCheck();
+    return;
+  }
+  await startRun({ kind: "scalability", target: brief });
+}
 
 async function startScalabilityCheck(): Promise<void> {
   const target = await vscode.window.showInputBox({

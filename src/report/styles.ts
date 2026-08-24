@@ -882,40 +882,15 @@ footer {
 }
 `;
 
-export const SIDEBAR_STYLES = `
-${TOKENS}
-
-body {
-  margin: 0;
-  padding: 14px 12px 24px;
-  font-family: var(--vscode-font-family);
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: var(--ink);
-  -webkit-font-smoothing: antialiased;
-}
-:root {
-  --surface: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 4%, transparent);
-  --surface-raised: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 8%, transparent);
-  --surface-sunken: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 2%, transparent);
-  --hairline: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 13%, transparent);
-  --hairline-strong: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 22%, transparent);
-}
-
-${BUTTONS}
-
-h2 {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.11em;
-  text-transform: uppercase;
-  color: var(--ink-muted);
-  margin: 20px 0 8px;
-}
-h2:first-child { margin-top: 0; }
-p { margin: 0 0 10px; }
-.muted { color: var(--ink-muted); font-size: 11.5px; line-height: 1.5; }
-
+/**
+ * The sign-in surface, shared by the sidebar and the build panel.
+ *
+ * Lives here rather than in either sheet because both draw the same hero and
+ * the same connect matrix from `webview/brand.ts` — a copy in each is how the
+ * panel ended up looking like a different product from the sidebar that opened
+ * it.
+ */
+const SIGN_IN = `
 /* ---- Sign-in ---- */
 
 /* The hero owns its surface: a fixed brand look rather than the editor theme,
@@ -1042,6 +1017,61 @@ button.chip.primary:hover { filter: brightness(1.08); transform: translateY(-0.5
 .more > summary .chev { transition: transform 140ms ease; flex: 0 0 auto; }
 .more[open] > summary .chev { transform: rotate(90deg); }
 .more .connect-grid { margin-top: 6px; }
+
+/* The label above a block on a sign-in screen. */
+h2.section {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 20px 0 8px;
+}
+
+.footnote {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  font-size: 11px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+`;
+
+export const SIDEBAR_STYLES = `
+${TOKENS}
+
+body {
+  margin: 0;
+  padding: 14px 12px 24px;
+  font-family: var(--vscode-font-family);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+:root {
+  --surface: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 4%, transparent);
+  --surface-raised: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 8%, transparent);
+  --surface-sunken: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 2%, transparent);
+  --hairline: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 13%, transparent);
+  --hairline-strong: color-mix(in srgb, var(--vscode-sideBar-foreground, var(--vscode-foreground)) 22%, transparent);
+}
+
+${BUTTONS}
+${SIGN_IN}
+
+h2 {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 20px 0 8px;
+}
+h2:first-child { margin-top: 0; }
+p { margin: 0 0 10px; }
+.muted { color: var(--ink-muted); font-size: 11.5px; line-height: 1.5; }
 
 .account {
   display: flex;
@@ -1219,14 +1249,6 @@ button.link:hover { color: var(--accent); }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.footnote {
-  margin-top: 20px;
-  padding-top: 12px;
-  border-top: 1px solid var(--hairline);
-  font-size: 11px;
-  color: var(--ink-muted);
-  line-height: 1.5;
-}
 `;
 
 /**
@@ -1249,6 +1271,7 @@ button.link:hover { color: var(--accent); }
 export const CHAT_STYLES = `
 ${TOKENS}
 ${BUTTONS}
+${SIGN_IN}
 
 :root {
   --chat-radius: 10px;
@@ -1271,7 +1294,7 @@ body {
 /* Anything that can hold long text has to be allowed to shrink, or flexbox
    keeps it at its content width and pushes its siblings off the edge. */
 .chat-head, .head-row, .head-meters, .thread, .composer,
-.card, .card-head, .tool-line, .composer .row { min-width: 0; }
+.card, .card-head, .trace, .trace-row, .composer .row { min-width: 0; }
 
 /* ---- Header ---- */
 .chat-head {
@@ -1430,30 +1453,185 @@ button.meter.changed { color: var(--sev-medium); }
 .assistant pre code { background: none; border: none; padding: 0; }
 
 /* ---- Tool trace ---- */
-.tool-line {
-  display: flex;
+/*
+ * One run of looking, drawn as a thread of steps rather than a stack of lines.
+ *
+ * The spine is the whole idea: a hairline down the column of marks, so a dozen
+ * reads read as one movement with a beginning and an end, and the cards on
+ * either side of it read as the things that came out of that movement. Every
+ * row is on the same four-column grid, which is what lets the eye run down the
+ * verbs, or down the paths, or down the results, without reading any of the
+ * others.
+ */
+.trace {
+  position: relative;
+  margin: var(--space-3) 0;
+  padding: var(--space-1) 0;
+}
+/* Behind the marks, stopping half a row short at each end so it reads as a
+   thread through them rather than a rule the first mark is sitting on. */
+.trace::before {
+  content: "";
+  position: absolute;
+  left: 9.5px;
+  top: 16px;
+  bottom: 14px;
+  width: 1px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    var(--hairline) 12%,
+    var(--hairline) 88%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+.trace-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 20px 4.4rem minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--space-2);
+  margin-inline: -6px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
   font-size: 11.5px;
   color: var(--ink-muted);
-  padding: 2px 0;
 }
-.tool-line .glyph { flex: 0 0 auto; opacity: 0.5; }
-.tool-line:hover .glyph { opacity: 0.9; }
-.tool-line .verb {
-  flex: 0 0 auto;
-  min-width: 4.5rem;
-  font-size: 11px;
-  opacity: 0.85;
+.trace-row:hover { background: var(--surface); color: var(--ink); }
+.trace-row.folded { display: none; }
+
+/* The mark sits in a tile so it can carry a tone and cover the spine — the
+   line has to pass behind the marks, not through the gaps between them. */
+.trace-row .chip {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--hairline);
+  background: var(--vscode-editor-background);
+  color: var(--ink-muted);
 }
-.tool-line .arg {
+.trace-row.tone-find .chip {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--vscode-editor-background));
+}
+.trace-row.tone-agent .chip {
+  color: var(--brand-accent);
+  border-color: color-mix(in srgb, var(--brand-accent) 32%, transparent);
+  background: color-mix(in srgb, var(--brand-accent) 10%, var(--vscode-editor-background));
+}
+.trace-row.bad .chip {
+  color: var(--sev-critical);
+  border-color: color-mix(in srgb, var(--sev-critical) 38%, transparent);
+  background: color-mix(in srgb, var(--sev-critical) 10%, var(--vscode-editor-background));
+}
+
+.trace-row .verb {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trace-row .arg {
   min-width: 0;
   font-family: var(--mono);
   font-size: 11px;
+  color: var(--ink);
+  opacity: 0.82;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A path is read from its end, so it is the start that gives way. */
+.trace-row .arg.path { direction: rtl; text-align: left; }
+.trace-row .note {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+.trace-row.bad .note { color: var(--sev-critical); opacity: 1; }
+
+/* A step still in flight: the mark breathes a ring, and the argument carries a
+   slow sweep. Both are pure decoration, so both stop under reduced motion and
+   leave a row that still says everything it said before. */
+.trace-row.running .chip::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  animation: trace-ping 1.6s ease-out infinite;
+}
+@keyframes trace-ping {
+  0% { opacity: 0.9; transform: scale(0.82); }
+  70% { opacity: 0; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.15); }
+}
+.trace-row.running .arg {
+  opacity: 1;
+  background: linear-gradient(
+    100deg,
+    var(--ink-muted) 34%,
+    var(--ink) 50%,
+    var(--ink-muted) 66%
+  ) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: trace-sweep 1.9s linear infinite;
+}
+@keyframes trace-sweep {
+  from { background-position: 150% 0; }
+  to { background-position: -150% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .trace-row.running .arg {
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--ink);
+  }
+  .trace-row.running .chip::after { display: none; }
+}
+
+/* The fold. One line standing in for however many steps have scrolled past. */
+/* Same grid as a row, so its bead sits on the spine with all the others. */
+.trace-more {
+  display: grid;
+  grid-template-columns: 20px auto auto;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline: -6px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  border: none;
+  text-align: left;
+}
+/* An author display rule beats the UA sheet's hidden-attribute rule, so the
+   fold has to say so itself — without this it draws an empty bead whenever
+   there is nothing folded. */
+.trace-more[hidden] { display: none; }
+.trace-more::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  justify-self: center;
+  border-radius: 50%;
+  background: var(--hairline-strong);
+}
+.trace-more .chev { transform: rotate(90deg); opacity: 0.7; }
+.trace-more:hover { background: var(--surface); color: var(--ink); }
 
 /* ---- Cards ---- */
 .card {
@@ -1562,9 +1740,64 @@ button.meter.changed { color: var(--sev-medium); }
   font-size: 11px;
   line-height: 1.45;
 }
-.cmd .status { padding: var(--space-2) var(--space-3); font-size: 11px; border-top: 1px solid var(--hairline); }
-.cmd .status.ok { color: var(--good); }
-.cmd .status.bad { color: var(--sev-critical); }
+/* A command that has printed nothing yet should not reserve a band of empty
+   sunken surface for the output it may never have. */
+.cmd .out:empty { display: none; }
+
+/*
+ * How it ended, in the header where it gets scanned for — not under however
+ * many lines of output the command happened to print.
+ */
+.pill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-family: var(--vscode-font-family);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pill::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.pill.ok {
+  color: var(--good);
+  border-color: color-mix(in srgb, var(--good) 38%, transparent);
+  background: color-mix(in srgb, var(--good) 10%, transparent);
+}
+.pill.bad {
+  color: var(--sev-critical);
+  border-color: color-mix(in srgb, var(--sev-critical) 38%, transparent);
+  background: color-mix(in srgb, var(--sev-critical) 10%, transparent);
+}
+.pill.running {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: var(--accent-soft);
+}
+.pill.running::before { animation: pill-breathe 1.4s ease-in-out infinite; }
+@keyframes pill-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+/* A running command is the live thing on screen; the card says so. */
+.cmd-card:has(.pill.running) {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
 
 /* ---- Permission ---- */
 .ask {
@@ -1732,6 +1965,14 @@ button.meter.changed { color: var(--sev-medium); }
   border-color: color-mix(in srgb, var(--good) 32%, transparent);
 }
 .bar-chip svg { flex: 0 0 auto; }
+/* The caret is the only thing saying this chip opens something rather than
+   toggling in place, so it stays when the label is spent at narrow widths. */
+.bar-chip.mode-pick .caret { transform: rotate(90deg); opacity: 0.6; margin-left: -0.15rem; }
+.bar-chip.mode-pick:hover .caret { opacity: 1; }
+
+/* Anchored to the mode chip at the left of the bar, not the model pick. */
+.mode-menu { right: auto; left: 0; min-width: min(17rem, 100%); }
+.mode-menu .popover-row .detail { white-space: normal; line-height: 1.35; }
 
 .model-pick {
   display: inline-flex;
@@ -1840,14 +2081,22 @@ button.meter.changed { color: var(--sev-medium); }
 .toggle input { accent-color: var(--accent); }
 .hint { font-size: 11.5px; color: var(--ink-muted); margin: 0; }
 
-/* ---- Empty state ---- */
-.empty { max-width: 32rem; margin: 8vh auto 0; text-align: center; padding: 0 var(--space-2); }
-.empty h1 { font-size: 16px; font-weight: 600; margin: 0 0 var(--space-3); letter-spacing: -0.01em; }
-.empty p { color: var(--ink-muted); margin: 0 0 var(--space-5); font-size: 12.5px; }
-.examples { display: grid; gap: var(--space-2); text-align: left; }
+/* ---- Start page ---- */
+/*
+ * The panel's first screen, wearing the same mark and the same connect matrix
+ * as the sidebar — see SIGN_IN, which both sheets pull in. Only the widths and
+ * the block above the matrix belong to this surface.
+ */
+.empty { max-width: 34rem; margin: 4vh auto 0; padding: 0 var(--space-2) var(--space-6); }
+.empty .hero { padding-top: 8px; }
+.empty .hero h1 { max-width: 24ch; }
+.empty .hero .lede { max-width: 44ch; }
+.empty h2.section { text-align: center; margin-top: 24px; }
+
+.examples { display: grid; gap: var(--space-2); }
 .examples button {
   border: 1px solid var(--hairline);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: var(--space-3);
   color: var(--ink-muted);
   font-size: 12px;
@@ -1856,6 +2105,7 @@ button.meter.changed { color: var(--sev-medium); }
   background: var(--surface);
 }
 .examples button:hover { background: var(--surface-raised); color: var(--ink); border-color: var(--accent); }
+.empty .footnote { text-align: center; }
 
 /* ---- Narrow ---- */
 /*
@@ -1865,7 +2115,7 @@ button.meter.changed { color: var(--sev-medium); }
 @media (max-width: 340px) {
   .chat-head, .todos { padding-left: var(--space-3); padding-right: var(--space-3); }
   .thread, .composer { padding-left: var(--space-3); padding-right: var(--space-3); }
-  .tool-line .verb { min-width: 0; }
+  .trace-row { grid-template-columns: 20px minmax(0, auto) minmax(0, 1fr) auto; }
   .mode-chip span { display: none; }
   .mode-chip { padding: 0.2rem 0.4rem; }
   .head-meters { gap: var(--space-1) var(--space-2); }

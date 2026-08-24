@@ -42,6 +42,7 @@ export type IconName =
   | "flag"
   | "gauge"
   | "graph"
+  | "trend"
   | "wrench"
   | "download"
   | "plus"
@@ -374,6 +375,17 @@ const GLYPHS: Record<IconName, Glyph> = {
     box: 24,
     strokes: ["M3.5 18 A9 9 0 1 1 20.5 18", "M12 12 L16.5 8.5"],
     circles: [{ cx: 12, cy: 12, r: 1.3, fill: true }],
+  },
+  /** A scalability check — the line that has to keep holding as load rises. */
+  trend: {
+    box: 24,
+    strokes: [
+      "M3.5 20.5 V4",
+      "M3.5 20.5 H21",
+      "M6.5 16.5 L11 11.5 L14.5 14.5 L20 7.5",
+      "M20 12 V7.5 H15.5",
+    ],
+    width: 1.7,
   },
   graph: {
     box: 24,

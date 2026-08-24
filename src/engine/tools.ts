@@ -53,6 +53,14 @@ export interface ReportSubmission {
 export interface ToolOutcome {
   content: string;
   isError?: boolean;
+  /**
+   * A phrase for the trace row in the panel — "218 lines", "6 matches".
+   *
+   * Written here rather than parsed back out of `content` downstream: the
+   * content is prose addressed to the model and free to be reworded, and a UI
+   * that reads numbers out of it breaks silently the first time it is.
+   */
+  note?: string;
   finding?: Finding;
   fix?: CodeFix;
   report?: ReportSubmission;
@@ -125,6 +133,7 @@ export class ToolRunner {
     if (hits.length === 0) {
       return {
         content: `Nothing in the index matched "${query}". Try different words, list_signals for a specific marker, or search for an exact string.`,
+        note: "no match",
       };
     }
     const lines = [`Files most relevant to "${query}":`, ""];
@@ -136,7 +145,7 @@ export class ToolRunner {
     }
     lines.push("");
     lines.push("Read the ones that matter before drawing conclusions from them.");
-    return { content: lines.join("\n") };
+    return { content: lines.join("\n"), note: count(hits.length, "file") };
   }
 
   private listSignals(kind: string): ToolOutcome {
@@ -144,27 +153,35 @@ export class ToolRunner {
       return {
         content: `Unknown signal kind "${kind}". Valid kinds: ${ALL_SIGNAL_KINDS.join(", ")}.`,
         isError: true,
+        note: "unknown kind",
       };
     }
     const results = signalsOfKind(this.ctx.index, kind as SignalKind);
     if (results.length === 0) {
-      return { content: `No occurrences of ${SIGNAL_LABELS[kind as SignalKind]} were indexed.` };
+      return {
+        content: `No occurrences of ${SIGNAL_LABELS[kind as SignalKind]} were indexed.`,
+        note: "none",
+      };
     }
     const lines = [`${SIGNAL_LABELS[kind as SignalKind]} — ${results.length} occurrence(s):`];
     for (const result of results) {
       lines.push(`${result.path}:${result.line}: ${result.text}`);
     }
-    return { content: lines.join("\n") };
+    return { content: lines.join("\n"), note: count(results.length, "hit") };
   }
 
   private async listDir(relPath: string): Promise<ToolOutcome> {
     const uri = this.resolve(relPath);
     if (!uri) {
-      return { content: `Path is outside the workspace: ${relPath}`, isError: true };
+      return {
+        content: `Path is outside the workspace: ${relPath}`,
+        isError: true,
+        note: "outside the workspace",
+      };
     }
     const entries = await vscode.workspace.fs.readDirectory(uri);
     if (entries.length === 0) {
-      return { content: `${relPath || "."} is empty.` };
+      return { content: `${relPath || "."} is empty.`, note: "empty" };
     }
     const shown = entries.slice(0, MAX_DIR_ENTRIES);
     const lines = shown.map(([name, type]) =>
@@ -173,7 +190,10 @@ export class ToolRunner {
     if (entries.length > shown.length) {
       lines.push(`… +${entries.length - shown.length} more entries`);
     }
-    return { content: `${relPath || "."}:\n${lines.join("\n")}` };
+    return {
+      content: `${relPath || "."}:\n${lines.join("\n")}`,
+      note: count(entries.length, "entry", "entries"),
+    };
   }
 
   private async readFile(
@@ -183,7 +203,11 @@ export class ToolRunner {
   ): Promise<ToolOutcome> {
     const uri = this.resolve(relPath);
     if (!uri) {
-      return { content: `Path is outside the workspace: ${relPath}`, isError: true };
+      return {
+        content: `Path is outside the workspace: ${relPath}`,
+        isError: true,
+        note: "outside the workspace",
+      };
     }
     let bytes: Uint8Array;
     try {
@@ -192,6 +216,7 @@ export class ToolRunner {
       return {
         content: `No such file: ${relPath}. Use list_dir or search to find the correct path.`,
         isError: true,
+        note: "no such file",
       };
     }
     const text = Buffer.from(bytes).toString("utf8");
@@ -206,6 +231,12 @@ export class ToolRunner {
     const header = `${relPath} (lines ${from}-${to} of ${allLines.length})`;
     return {
       content: `${header}\n${capped}${truncated ? "\n… [truncated: request a narrower line range]" : ""}`,
+      // A whole file says how long it is; a slice says how much of it was taken,
+      // which is the part worth seeing when the agent keeps re-reading one file.
+      note:
+        selected.length >= allLines.length
+          ? count(allLines.length, "line")
+          : `${selected.length} of ${allLines.length} lines`,
     };
   }
 
@@ -242,7 +273,11 @@ export class ToolRunner {
         ? new RegExp(pattern, "i")
         : new RegExp(escapeRegex(pattern), "i");
     } catch (err) {
-      return { content: `Invalid regular expression: ${String(err)}`, isError: true };
+      return {
+        content: `Invalid regular expression: ${String(err)}`,
+        isError: true,
+        note: "bad pattern",
+      };
     }
 
     const files = await vscode.workspace.findFiles(
@@ -298,6 +333,7 @@ export class ToolRunner {
     if (matches.length === 0) {
       return {
         content: `No matches for ${pattern} (searched ${scanned} files).${ranOut}`,
+        note: "no match",
       };
     }
     const capped = matches.length >= MAX_SEARCH_RESULTS;
@@ -305,6 +341,7 @@ export class ToolRunner {
       content:
         `${matches.length} match(es) for ${pattern}:\n${matches.join("\n")}` +
         (capped ? "\n… result cap reached; narrow the pattern for more." : ranOut),
+      note: `${count(matches.length, "match", "matches")}${capped ? "+" : ""}`,
     };
   }
 
@@ -774,6 +811,11 @@ function numberOrUndefined(value: unknown): number | undefined {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+/** "1 file", "6 files" — for the one-phrase notes the trace row shows. */
+function count(n: number, singular: string, plural = `${singular}s`): string {
+  return `${n} ${n === 1 ? singular : plural}`;
 }
 
 function escapeRegex(text: string): string {

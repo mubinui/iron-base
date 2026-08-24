@@ -16,14 +16,15 @@ import type { DiffHunk } from "../src/engine/diff";
 import type { BuildPlan, Todo } from "../src/engine/plan";
 import type {
   ChatHostMessage,
-  ChatMode,
   ChatState,
   ChatWebviewMessage,
+  ComposerMode,
   ModelOption,
   PermissionCard,
   ThreadItem,
 } from "../src/protocol";
 import { formatCost } from "../src/llm/modelLimits";
+import { connectMatrix, hero, keychainFootnote } from "./brand";
 import { icon, PROVIDER_ICONS, type IconName } from "./icons";
 import { renderMarkdown } from "./markdown";
 
@@ -47,7 +48,7 @@ let state: ChatState = {
   autoAcceptEdits: false,
   changedFiles: 0,
 };
-let mode: ChatMode = "architect";
+let mode: ComposerMode = "architect";
 let todos: Todo[] = [];
 let draft = "";
 
@@ -56,6 +57,20 @@ let streamingBubble: HTMLElement | undefined;
 const commandNodes = new Map<string, { out: HTMLElement; status: HTMLElement }>();
 const changeNodes = new Map<string, HTMLElement>();
 const askNodes = new Map<string, HTMLElement>();
+const traceNodes = new Map<string, HTMLElement>();
+
+/**
+ * The trace group still taking rows.
+ *
+ * Consecutive looks belong together — one fan-out of reads, one sweep of the
+ * index — and a dozen loose grey lines between two cards read as noise rather
+ * than as a step. Anything that is not a look closes the group, so the shape of
+ * the thread says where the agent was looking and where it was doing.
+ */
+let openTrace: HTMLElement | undefined;
+
+/** True while the start page owns the screen, which the composer defers to. */
+let onStartPage = true;
 
 // --- Shell -----------------------------------------------------------------
 
@@ -80,10 +95,15 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-document.addEventListener("click", () => closeModelMenu());
+document.addEventListener("click", () => closePopovers());
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") closeModelMenu();
+  if (event.key === "Escape") closePopovers();
 });
+
+function closePopovers(): void {
+  closeModelMenu();
+  closeModeMenu();
+}
 
 window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
   const message = event.data;
@@ -93,8 +113,12 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
       // textarea and must not be torn down and rebuilt underneath someone
       // who is typing in it. So it is rebuilt only when what it draws changed.
       const before = composerSignature();
+      const beforePage = startPageSignature();
       state = message.state;
       renderHead();
+      // Signing in from the start page has to redraw it: the matrix that was
+      // the whole screen a second ago is now the wrong thing to be looking at.
+      if (onStartPage && startPageSignature() !== beforePage) showStartPage();
       if (composerSignature() !== before) renderComposer();
       syncPlanActions();
       break;
@@ -102,19 +126,23 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
 
     case "replay":
       todos = message.todos;
+      onStartPage = false;
       thread.replaceChildren();
       commandNodes.clear();
       changeNodes.clear();
       askNodes.clear();
+      traceNodes.clear();
       streamingBubble = undefined;
+      openTrace = undefined;
       for (const item of message.thread) appendItem(item);
       // A replay mid-reply must continue the bubble it rebuilt, or the rest of
       // the sentence arrives in a second paragraph below the first.
       if (message.thread[message.thread.length - 1]?.kind === "assistant") {
         streamingBubble = thread.lastElementChild as HTMLElement | undefined;
       }
-      if (message.thread.length === 0) thread.append(emptyState());
+      if (message.thread.length === 0) showStartPage();
       renderTodos();
+      renderComposer();
       scrollToEnd();
       break;
 
@@ -152,8 +180,13 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
       const node = commandNodes.get(message.id);
       if (node) {
         node.status.textContent = message.status;
-        node.status.className = `status ${message.ok ? "ok" : "bad"}`;
+        node.status.className = `pill ${message.ok ? "ok" : "bad"}`;
       }
+      break;
+    }
+
+    case "toolEnd": {
+      settleTraceRow(message.id, message.note, message.ok);
       break;
     }
 
@@ -342,6 +375,10 @@ function renderTodos(): void {
 
 function appendItem(item: ThreadItem): void {
   streamingBubble = undefined;
+  // A look joins the open group; anything else closes it. Doing this here, on
+  // the one path every item goes through, is what keeps the grouping true for
+  // a replayed thread as well as a live one.
+  if (item.kind !== "tool") openTrace = undefined;
   switch (item.kind) {
     case "user":
       thread.append(el("div", item.text, "bubble-user"));
@@ -355,16 +392,9 @@ function appendItem(item: ThreadItem): void {
       break;
     }
 
-    case "tool": {
-      const row = el("div", undefined, "tool-line");
-      row.append(
-        icon(toolIcon(item.name), 12, "glyph"),
-        el("span", toolVerb(item.name), "verb"),
-        el("span", item.summary, "arg"),
-      );
-      thread.append(row);
+    case "tool":
+      appendTraceRow(item);
       break;
-    }
 
     case "change":
       thread.append(changeCard(item));
@@ -389,6 +419,102 @@ function appendItem(item: ThreadItem): void {
       thread.append(finishedCard(item.summary, item.followUps));
       break;
   }
+}
+
+// --- The trace -------------------------------------------------------------
+
+/**
+ * How many rows of a group stay on screen before the older ones fold away.
+ *
+ * A build can read eighty files in a row. All eighty are worth having — that is
+ * the audit trail — but not at the cost of pushing the edit that came out of
+ * them off the top of the view. The newest stay visible because those are the
+ * ones being watched; the rest go behind one line that says how many.
+ */
+const TRACE_VISIBLE = 7;
+
+function appendTraceRow(item: Extract<ThreadItem, { kind: "tool" }>): void {
+  const group = openTrace ?? startTrace();
+  const rows = group.querySelector<HTMLElement>(".trace-rows")!;
+
+  const row = el("div", undefined, `trace-row ${toneFor(item.name)}`);
+  const chip = el("span", undefined, "chip");
+  chip.append(icon(toolIcon(item.name), 12));
+  const arg = el("span", item.summary, "arg");
+  // A path is read from its end — which file, in which folder — so it is the
+  // start that gives way when the sidebar is narrow. A query is read from the
+  // front like any other sentence.
+  if (looksLikePath(item.summary)) arg.classList.add("path");
+  row.append(chip, el("span", toolVerb(item.name), "verb"), arg, el("span", undefined, "note"));
+  row.title = `${item.name} ${item.summary}`.trim();
+
+  rows.append(row);
+  traceNodes.set(item.id, row);
+  if (item.ok === undefined) row.classList.add("running");
+  else settleRow(row, item.note, item.ok);
+
+  // Exactly one row crosses the fold on each append, so only that one is
+  // touched — the alternative reflows the whole group on every read.
+  const total = rows.childElementCount;
+  if (!group.classList.contains("open") && total > TRACE_VISIBLE) {
+    rows.children[total - TRACE_VISIBLE - 1].classList.add("folded");
+    setFoldedCount(group, total - TRACE_VISIBLE);
+  }
+}
+
+function startTrace(): HTMLElement {
+  const group = el("div", undefined, "trace");
+  const more = el("button", undefined, "trace-more");
+  more.hidden = true;
+  more.addEventListener("click", () => {
+    group.classList.add("open");
+    group.querySelectorAll(".trace-row.folded").forEach((row) => row.classList.remove("folded"));
+    more.hidden = true;
+  });
+  group.append(more, el("div", undefined, "trace-rows"));
+  thread.append(group);
+  openTrace = group;
+  return group;
+}
+
+function setFoldedCount(group: HTMLElement, count: number): void {
+  const more = group.querySelector<HTMLButtonElement>(".trace-more")!;
+  more.hidden = false;
+  more.replaceChildren(
+    icon("chevron", 11, "chev"),
+    el("span", `${count} earlier step${count === 1 ? "" : "s"}`),
+  );
+}
+
+function settleTraceRow(id: string, note: string | undefined, ok: boolean): void {
+  const row = traceNodes.get(id);
+  if (row) settleRow(row, note, ok);
+}
+
+function settleRow(row: HTMLElement, note: string | undefined, ok: boolean): void {
+  row.classList.remove("running");
+  row.classList.toggle("bad", !ok);
+  const slot = row.querySelector<HTMLElement>(".note");
+  if (slot) slot.textContent = note ?? "";
+}
+
+/** Which of the three tones a step gets: looking, finding, or delegating. */
+function toneFor(name: string): string {
+  switch (name) {
+    case "search":
+    case "find_relevant":
+    case "list_signals":
+      return "tone-find";
+    case "delegate_search":
+      return "tone-agent";
+    default:
+      return name.startsWith("mcp__") ? "tone-agent" : "tone-look";
+  }
+}
+
+/** Good enough to decide which end of the text to truncate, and no more. */
+function looksLikePath(text: string): boolean {
+  return text.includes("/") && !text.includes(" ");
 }
 
 function changeCard(item: Extract<ThreadItem, { kind: "change" }>): HTMLElement {
@@ -422,23 +548,35 @@ function changeCard(item: Extract<ThreadItem, { kind: "change" }>): HTMLElement 
   return card;
 }
 
+/**
+ * A command, its output, and how it ended.
+ *
+ * The verdict is the part anyone scans for, so it sits in the header as a pill
+ * rather than at the bottom of however many lines of output the command
+ * produced — which was frequently below the fold.
+ */
 function commandCard(item: Extract<ThreadItem, { kind: "command" }>): HTMLElement {
-  const card = el("div", undefined, "card");
+  const card = el("div", undefined, "card cmd-card");
   const header = el("div", undefined, "card-head");
+  const status = el(
+    "div",
+    item.status ?? "running",
+    `pill ${item.ok === undefined ? "running" : item.ok ? "ok" : "bad"}`,
+  );
   header.append(
     icon("terminal", 13, "glyph"),
     el("span", "run", "verb"),
     el("span", undefined, "spacer"),
+    status,
   );
   card.append(header);
 
-  const body = el("div", undefined, "cmd");
-  body.append(el("div", item.command, "line"));
   if (item.why) card.append(el("div", item.why, "why"));
 
+  const body = el("div", undefined, "cmd");
+  body.append(el("div", item.command, "line"));
   const out = el("pre", item.output, "out");
-  const status = el("div", item.status ?? "running…", `status${item.ok === undefined ? "" : item.ok ? " ok" : " bad"}`);
-  body.append(out, status);
+  body.append(out);
   card.append(body);
 
   commandNodes.set(item.id, { out, status });
@@ -580,6 +718,11 @@ function renderComposer(): void {
   const inner = el("div", undefined, "inner");
 
   if (!state.providerLabel) {
+    // The start page already carries the whole connect matrix. Repeating a
+    // second "connect an account" button under it would be two calls to action
+    // for one decision, so the composer stands down while that page is up and
+    // speaks only once a thread exists to come back to.
+    if (onStartPage) return;
     const empty = el("div", undefined, "composer-box signed-out");
     empty.append(
       el("p", "No AI account is connected yet.", "hint"),
@@ -592,14 +735,13 @@ function renderComposer(): void {
     return;
   }
 
-  const box = el("div", undefined, "composer-box");
+  const spec = MODES[mode];
+  const box = el("div", undefined, `composer-box mode-${mode}`);
   input.value = draft;
-  input.disabled = state.running;
-  input.placeholder = state.running
-    ? "Working…"
-    : mode === "architect"
-      ? "Describe a change — it will plan first"
-      : "Describe a change — it will start writing";
+  // A whole-project review takes no brief, so the box says what will happen
+  // and stops taking typing rather than accepting a sentence it would drop.
+  input.disabled = state.running || spec.brief === "none";
+  input.placeholder = state.running ? "Working…" : spec.placeholder;
   box.append(input);
 
   const bar = el("div", undefined, "composer-bar");
@@ -609,33 +751,32 @@ function renderComposer(): void {
     iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
   );
 
-  const modeButton = el("button", undefined, "bar-chip");
-  modeButton.append(
-    icon(mode === "architect" ? "compass" : "hammer", 13),
-    el("span", mode === "architect" ? "Plan first" : "Build only"),
-  );
-  modeButton.title =
-    mode === "architect"
-      ? "Explores read-only and hands you a plan to approve. Click to build straight away instead."
-      : "Starts writing straight away. Click to plan first instead.";
-  modeButton.addEventListener("click", () => {
-    mode = mode === "architect" ? "build" : "architect";
-    renderComposer();
+  const modeButton = el("button", undefined, "bar-chip mode-pick");
+  modeButton.append(icon(spec.glyph, 13), el("span", spec.label), icon("chevron", 10, "caret"));
+  modeButton.title = `${spec.label} — ${spec.blurb}\nClick to choose what IronBase does with what you type.`;
+  modeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleModeMenu(modeButton);
   });
   bar.append(modeButton);
 
-  const approve = el("button", undefined, `bar-chip${state.autoAcceptEdits ? " on" : ""}`);
-  approve.append(
-    icon(state.autoAcceptEdits ? "check" : "signIn", 13),
-    el("span", state.autoAcceptEdits ? "Approve for me" : "Ask me"),
-  );
-  approve.title = state.autoAcceptEdits
-    ? "Edits are applied without asking. Deletions and commands still ask. Click to be asked again."
-    : "Every edit shows you a diff first. Click to apply edits without asking.";
-  approve.addEventListener("click", () =>
-    vscode.postMessage({ type: "setAutoAccept", on: !state.autoAcceptEdits }),
-  );
-  bar.append(approve, el("span", undefined, "spacer"));
+  // Edits are the only thing this setting governs, so it goes away in the two
+  // modes that never make one rather than sitting there meaning nothing.
+  if (spec.kind === "agent") {
+    const approve = el("button", undefined, `bar-chip${state.autoAcceptEdits ? " on" : ""}`);
+    approve.append(
+      icon(state.autoAcceptEdits ? "check" : "signIn", 13),
+      el("span", state.autoAcceptEdits ? "Approve for me" : "Ask me"),
+    );
+    approve.title = state.autoAcceptEdits
+      ? "Edits are applied without asking. Deletions and commands still ask. Click to be asked again."
+      : "Every edit shows you a diff first. Click to apply edits without asking.";
+    approve.addEventListener("click", () =>
+      vscode.postMessage({ type: "setAutoAccept", on: !state.autoAcceptEdits }),
+    );
+    bar.append(approve);
+  }
+  bar.append(el("span", undefined, "spacer"));
 
   // Right: which model, and go.
   const model = document.createElement("button");
@@ -666,9 +807,9 @@ function renderComposer(): void {
     bar.append(stop);
   } else {
     const sendButton = el("button", undefined, "circle-btn send");
-    sendButton.title = "Send — Enter to send, Shift+Enter for a new line";
-    sendButton.setAttribute("aria-label", "Send");
-    sendButton.append(icon("send", 15));
+    sendButton.title = spec.action;
+    sendButton.setAttribute("aria-label", spec.action);
+    sendButton.append(icon(spec.kind === "agent" ? "send" : "play", 15));
     sendButton.addEventListener("click", send);
     bar.append(sendButton);
   }
@@ -679,7 +820,7 @@ function renderComposer(): void {
 
   // Re-appending the textarea drops its focus, so it is restored — but only if
   // the developer was not busy in the editor or in a permission card.
-  if (!state.running && document.activeElement === document.body) input.focus();
+  if (!input.disabled && document.activeElement === document.body) input.focus();
 }
 
 /** What the composer draws, so a redraw can be skipped when none of it moved. */
@@ -690,7 +831,108 @@ function composerSignature(): string {
     state.model ?? "",
     state.autoAcceptEdits,
     mode,
+    onStartPage,
   ].join("|");
+}
+
+// --- Modes -----------------------------------------------------------------
+
+interface ModeSpec {
+  label: string;
+  glyph: IconName;
+  /**
+   * `agent` modes answer what you type in the thread. `run` modes look at the
+   * whole project and end in the report panel — different work with a different
+   * output, which is why the menu keeps them in their own group rather than
+   * presenting four interchangeable settings.
+   */
+  kind: "agent" | "run";
+  /** Whether what you type is the request, the parameter, or unused. */
+  brief: "task" | "target" | "none";
+  blurb: string;
+  placeholder: string;
+  /** What pressing the round button will do, for its tooltip. */
+  action: string;
+}
+
+const MODES: Record<ComposerMode, ModeSpec> = {
+  architect: {
+    label: "Plan first",
+    glyph: "compass",
+    kind: "agent",
+    brief: "task",
+    blurb: "Explores read-only and hands you a plan to approve",
+    placeholder: "Describe a change — it will plan first",
+    action: "Send — Enter to send, Shift+Enter for a new line",
+  },
+  build: {
+    label: "Build only",
+    glyph: "hammer",
+    kind: "agent",
+    brief: "task",
+    blurb: "Starts writing straight away",
+    placeholder: "Describe a change — it will start writing",
+    action: "Send — Enter to send, Shift+Enter for a new line",
+  },
+  review: {
+    label: "Analyze",
+    glyph: "graph",
+    kind: "run",
+    brief: "none",
+    blurb: "Reviews the whole project and opens a report",
+    placeholder: "Reviews the whole project — press send to start",
+    action: "Analyze this project's architecture",
+  },
+  scalability: {
+    label: "Scalability",
+    glyph: "trend",
+    kind: "run",
+    brief: "target",
+    blurb: "Checks the project against a load you name",
+    placeholder: "How many users should it serve? e.g. 10,000 concurrent",
+    action: "Run the scalability check",
+  },
+};
+
+const MODE_GROUPS: Array<{ title: string; modes: ComposerMode[] }> = [
+  { title: "Build", modes: ["architect", "build"] },
+  { title: "Review the whole project", modes: ["review", "scalability"] },
+];
+
+let modeMenu: HTMLElement | undefined;
+
+function closeModeMenu(): void {
+  modeMenu?.remove();
+  modeMenu = undefined;
+}
+
+function toggleModeMenu(anchor: HTMLElement): void {
+  if (modeMenu) {
+    closeModeMenu();
+    return;
+  }
+  closeModelMenu();
+  const menu = el("div", undefined, "popover mode-menu");
+  for (const group of MODE_GROUPS) {
+    menu.append(el("div", group.title, "popover-group"));
+    for (const id of group.modes) {
+      const spec = MODES[id];
+      const row = el("button", undefined, `popover-row${id === mode ? " current" : ""}`);
+      row.append(icon(spec.glyph, 14));
+      const body = el("span", undefined, "body");
+      body.append(el("span", spec.label, "name"), el("span", spec.blurb, "detail"));
+      row.append(body);
+      if (id === mode) row.append(icon("check", 13, "tick"));
+      row.addEventListener("click", () => {
+        closeModeMenu();
+        mode = id;
+        renderComposer();
+      });
+      menu.append(row);
+    }
+  }
+  anchor.parentElement?.append(menu);
+  modeMenu = menu;
 }
 
 /**
@@ -731,6 +973,7 @@ function toggleModelMenu(anchor: HTMLElement): void {
     closeModelMenu();
     return;
   }
+  closeModeMenu();
   const menu = el("div", undefined, "popover");
   menu.append(el("div", "Loading accounts…", "popover-empty"));
   anchor.parentElement?.append(menu);
@@ -776,38 +1019,105 @@ function fillModelMenu(options: ModelOption[]): void {
 }
 
 function send(): void {
+  if (state.running) return;
+  const current = mode;
   const text = input.value.trim();
-  if (text.length === 0 || state.running) return;
-  vscode.postMessage({ type: "send", text, mode });
+
+  if (current === "review") {
+    vscode.postMessage({ type: "startReview", kind: "review" });
+    return;
+  }
+  if (current === "scalability") {
+    // Empty is allowed through: the host owns the modal fallback, and asking
+    // there is better than a button that silently does nothing.
+    vscode.postMessage({ type: "startReview", kind: "scalability", target: text });
+    input.value = "";
+    draft = "";
+    return;
+  }
+
+  if (text.length === 0) return;
+  vscode.postMessage({ type: "send", text, mode: current });
   input.value = "";
   draft = "";
 }
 
-function emptyState(): HTMLElement {
+/**
+ * The start page.
+ *
+ * The panel's first screen used to be a sentence and three examples, which is a
+ * thin thing to open a product with — and when nothing was connected it sent
+ * people back to the sidebar to sign in, as though the two were different
+ * applications. It wears the same mark, wordmark and connect matrix as the
+ * sidebar now, from the one implementation of them, and answers the question
+ * the reader actually has: the pitch and a way in when signed out, what to type
+ * when signed in.
+ */
+function showStartPage(): void {
+  thread.querySelector(".empty")?.remove();
   const wrap = el("div", undefined, "empty");
-  wrap.append(el("h1", "What should IronBase build?"));
-  wrap.append(
-    el(
-      "p",
-      "It already knows how this project fits together — the index and the dependency map are built. Describe a change and it will plan it first, then write it once you approve.",
-    ),
-  );
-  const examples = el("div", undefined, "examples");
-  for (const example of EXAMPLES) {
-    examples.append(
-      button(example, "", () => {
-        input.value = example;
-        draft = example;
-        input.focus();
+
+  if (!state.providerLabel) {
+    wrap.append(
+      hero({
+        headline: "The coding agent that starts from your architecture",
+        lede:
+          "It maps your codebase first — the dependency graph, where the risk sits — then plans a change against that map and writes the code. Runs on an AI account you already have.",
       }),
     );
+    wrap.append(el("h2", "Connect an account", "section"));
+    wrap.append(
+      ...connectMatrix(new Set(state.sessionCapable ?? []), (id, method) =>
+        vscode.postMessage({ type: "connectProvider", id, method }),
+      ),
+    );
+    wrap.append(keychainFootnote());
+  } else {
+    wrap.append(
+      hero({
+        headline: "What should IronBase build?",
+        lede:
+          "It already knows how this project fits together — the index and the dependency map are built. Describe a change and it will plan it first, then write it once you approve.",
+      }),
+    );
+    wrap.append(el("h2", "Try", "section"));
+    const examples = el("div", undefined, "examples");
+    for (const example of EXAMPLES) {
+      examples.append(
+        button(example, "", () => {
+          input.value = example;
+          draft = example;
+          input.focus();
+        }),
+      );
+    }
+    wrap.append(examples);
+    wrap.append(
+      el(
+        "p",
+        "Or use the mode button below to review the whole project instead of changing it.",
+        "footnote",
+      ),
+    );
   }
-  wrap.append(examples);
-  return wrap;
+
+  thread.append(wrap);
+  onStartPage = true;
+}
+
+/** What the start page draws, so a redraw can be skipped when none of it moved. */
+function startPageSignature(): string {
+  return [state.providerLabel ?? "", (state.sessionCapable ?? []).join(",")].join("|");
 }
 
 function dropEmptyState(): void {
-  thread.querySelector(".empty")?.remove();
+  const page = thread.querySelector(".empty");
+  if (!page) return;
+  page.remove();
+  onStartPage = false;
+  // The composer stands down while the start page is signed out and up, so it
+  // has to be built the moment the page goes away.
+  renderComposer();
 }
 
 // --- Helpers ---------------------------------------------------------------
@@ -860,6 +1170,14 @@ function toolIcon(name: string): IconName {
   }
 }
 
+/**
+ * The word for a kind of work, kept short on purpose.
+ *
+ * These sit in a fixed column so the arguments line up down the group, and a
+ * verb long enough to need two words is a verb that either overflows it or
+ * widens it for every other row. An MCP tool keeps its own name minus the
+ * routing prefix, which is the only part that identifies it.
+ */
 function toolVerb(name: string): string {
   switch (name) {
     case "read_file":
@@ -867,11 +1185,13 @@ function toolVerb(name: string): string {
     case "list_dir":
       return "list";
     case "find_relevant":
-      return "search index";
+      return "index";
     case "list_signals":
       return "signals";
     case "search":
       return "grep";
+    case "delegate_search":
+      return "delegate";
     case "update_todos":
       return "tasks";
     case "submit_plan":
@@ -879,7 +1199,9 @@ function toolVerb(name: string): string {
     case "finish":
       return "done";
     default:
-      return name.replace(/_/g, " ");
+      return name.startsWith("mcp__")
+        ? name.slice("mcp__".length).replace(/_/g, " ")
+        : name.replace(/_/g, " ");
   }
 }
 
@@ -944,6 +1266,10 @@ function button(label: string, className: string, onClick: () => void): HTMLElem
 }
 
 renderHead();
+// The todo rail collapses itself when there is nothing in it, and until that
+// runs it is an empty bordered band under the header — visible for as long as
+// the first replay takes to arrive.
+renderTodos();
+showStartPage();
 renderComposer();
-thread.append(emptyState());
 vscode.postMessage({ type: "ready" });

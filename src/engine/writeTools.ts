@@ -77,6 +77,15 @@ export interface CodingToolContext {
   subagent?: Omit<SubagentContext, "onProgress">;
   /** Absent when no MCP server is configured or all of them failed to start. */
   mcp?: McpRegistry;
+  /**
+   * Distinguishes this run's ids from every other run's in the same session.
+   *
+   * A runner is built per task and its counters start at one, so without this
+   * the second task in a session hands out `change-1` again — and the panel
+   * resolves an id by searching the thread, so Undo on the newer card found
+   * the older card and put back a file nobody had asked about.
+   */
+  runId: string;
   onSubagentProgress?: (question: string, note: string) => void;
 }
 
@@ -259,7 +268,7 @@ export class CodingToolRunner {
     await writeText(uri, after);
 
     const change: FileChange = {
-      id: `change-${++this.changeCounter}`,
+      id: `change-${this.ctx.runId}-${++this.changeCounter}`,
       file: path,
       kind,
       diff,
@@ -318,7 +327,7 @@ export class CodingToolRunner {
     await vscode.workspace.fs.delete(uri, { useTrash: true });
     await reindexFile(this.ctx.index, this.ctx.root, path, "");
     this.ctx.onFileChange({
-      id: `change-${++this.changeCounter}`,
+      id: `change-${this.ctx.runId}-${++this.changeCounter}`,
       file: path,
       kind: "delete",
       diff: diffLines(before, ""),
@@ -342,7 +351,7 @@ export class CodingToolRunner {
     });
     if (!permitted.granted) return fail(permitted.reason);
 
-    const id = `command-${++this.commandCounter}`;
+    const id = `command-${this.ctx.runId}-${++this.commandCounter}`;
     this.ctx.onCommandStart(id, command, why);
     const result = await runCommand({
       command,

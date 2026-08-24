@@ -68,7 +68,15 @@ const MAX_TOKENS_PER_TURN = 16000;
 export type SessionEvent =
   | { type: "user"; text: string }
   | { type: "assistantText"; delta: string }
-  | { type: "tool"; name: string; summary: string }
+  /**
+   * A look at the project began. `id` pairs it with the `toolEnd` that lands.
+   *
+   * `ok` is set only when the row is already settled — a delegated search
+   * reporting progress it has finished — and left off for a call in flight.
+   */
+  | { type: "tool"; id: string; name: string; summary: string; note?: string; ok?: boolean }
+  /** That look landed, with a one-phrase account of what it found. */
+  | { type: "toolEnd"; id: string; note?: string; ok: boolean }
   | { type: "fileChange"; change: FileChange }
   | { type: "commandStart"; id: string; command: string; why?: string }
   | { type: "commandOutput"; id: string; chunk: string }
@@ -144,6 +152,17 @@ export class CodingSession {
   private totalOutput = 0;
   /** Said once per session, not once per task. */
   private announcedRules = false;
+  /** Numbers the trace rows, so a start and its end can find each other. */
+  private traceCounter = 0;
+  /**
+   * Stamped into every id this run hands out — see `CodingToolContext.runId`.
+   *
+   * The clock rather than a counter because a session can be restored from
+   * disk, which brings back a thread full of ids but no counter to carry on
+   * from. A task takes a network round trip, so two of them cannot start in
+   * the same millisecond.
+   */
+  private runId = "0";
 
   constructor(private readonly deps: CodingSessionDeps) {
     this.checkpoint = new Checkpoint(deps.root);
@@ -290,6 +309,8 @@ export class CodingSession {
 
     const source = new vscode.CancellationTokenSource();
     this.running = source;
+    this.runId = Date.now().toString(36);
+    this.traceCounter = 0;
     this.emitStatus(true);
 
     // MCP tools join the agent's own list, so the model sees one set of tools
@@ -322,6 +343,7 @@ export class CodingSession {
         index: this.deps.index,
         maxFileReadBytes: config.maxFileReadBytes,
         commandTimeoutMs: config.commandTimeoutMs,
+        runId: this.runId,
         token: source.token,
         permissions: this.permissions,
         checkpoint: this.checkpoint,
@@ -346,7 +368,16 @@ export class CodingSession {
           autoFailover: config.autoFailover,
         },
         onSubagentProgress: (question, note) =>
-          emit({ type: "tool", name: SUBAGENT_TOOL, summary: `${question} — ${note}` }),
+          // Progress from a delegated search is a report, not a call: it has
+          // already happened, so it is emitted settled rather than left to
+          // spin waiting for an end that is never coming.
+          emit({
+            type: "tool",
+            id: this.nextTraceId(),
+            name: SUBAGENT_TOOL,
+            summary: `${question} — ${note}`,
+            ok: true,
+          }),
       },
     );
 
@@ -575,12 +606,46 @@ export class CodingSession {
   ): Promise<boolean> {
     const { emit } = this.deps;
 
+    // Only the looking gets a trace row. Editing, running a command and
+    // finishing all draw their own card, and announcing them twice turns the
+    // useful part of the thread into scrollback.
+    //
+    // The rows go up before the reads start rather than as each one is
+    // consumed below, because the reads all run at once: a row per call,
+    // appearing together and settling one by one as the files come back, is
+    // what actually happened. Drawing them in the loop instead showed each
+    // read already finished, which made a burst of parallel work read as a
+    // slow march.
+    const traceIds = new Map<number, string>();
+    for (const [i, call] of calls.entries()) {
+      if (!READ_ONLY_TOOL_NAMES.has(call.name)) continue;
+      const id = this.nextTraceId();
+      traceIds.set(i, id);
+      emit({ type: "tool", id, name: call.name, summary: describeCall(call.name, call.input) });
+    }
+
+    const settle = (i: number, outcome: CodingOutcome): void => {
+      const id = traceIds.get(i);
+      if (id === undefined) return;
+      traceIds.delete(i);
+      emit({
+        type: "toolEnd",
+        id,
+        // A tool that named its own failure has said something more useful than
+        // "failed" — that it was the wrong path, not that the read broke.
+        note: outcome.note ?? (outcome.isError ? "failed" : undefined),
+        ok: outcome.isError !== true,
+      });
+    };
+
     const prefetched = new Map<number, CodingOutcome>();
     await mapWithConcurrency(
       calls.map((call, i) => ({ call, i })).filter(({ call }) => READ_ONLY_TOOL_NAMES.has(call.name)),
       MAX_PARALLEL_TOOLS,
       async ({ call, i }) => {
-        prefetched.set(i, await runner.run(call.name, call.input));
+        const outcome = await runner.run(call.name, call.input);
+        prefetched.set(i, outcome);
+        settle(i, outcome);
       },
     );
 
@@ -590,13 +655,8 @@ export class CodingSession {
     for (const [i, call] of calls.entries()) {
       if (token.isCancellationRequested) break;
 
-      // Only the looking gets a trace line. Editing, running a command and
-      // finishing all draw their own card, and announcing them twice turns the
-      // useful part of the thread into scrollback.
-      if (READ_ONLY_TOOL_NAMES.has(call.name)) {
-        emit({ type: "tool", name: call.name, summary: describeCall(call.name, call.input) });
-      }
       const outcome = prefetched.get(i) ?? (await runner.run(call.name, call.input));
+      settle(i, outcome);
 
       if (outcome.todos) {
         this.todos = outcome.todos;
@@ -633,8 +693,19 @@ export class CodingSession {
       });
     }
 
+    // Cancelling breaks the loop above, and a row left spinning would go on
+    // spinning for as long as the panel is open. Anything unsettled is closed
+    // here rather than abandoned.
+    for (const id of [...traceIds.values()]) emit({ type: "toolEnd", id, note: "stopped", ok: false });
+    traceIds.clear();
+
     if (results.length > 0) this.messages.push({ role: "toolResult", results });
     return finished;
+  }
+
+  private nextTraceId(): string {
+    this.traceCounter += 1;
+    return `t${this.runId}-${this.traceCounter}`;
   }
 
   /** One last turn after a cap, to get a report out rather than stopping mute. */

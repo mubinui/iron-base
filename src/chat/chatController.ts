@@ -41,7 +41,8 @@ import {
 import { scanWorkspace } from "../scanner/workspaceScanner";
 import { createNonce } from "../report/reportPanel";
 import { CHAT_STYLES } from "../report/styles";
-import { PROVIDER_LABELS, type ProviderId } from "../llm/types";
+import { ALL_PROVIDERS, PROVIDER_LABELS, supportsMethod, type ProviderId } from "../llm/types";
+import { canCaptureSession } from "../llm/webSessions";
 import { log } from "../util/log";
 import { resolveInside } from "../util/paths";
 import {
@@ -53,6 +54,10 @@ import {
   type ThreadItem,
   isAllowedCommand,
 } from "../protocol";
+
+function isProvider(value: unknown): value is ProviderId {
+  return typeof value === "string" && (ALL_PROVIDERS as readonly string[]).includes(value);
+}
 
 /** Scheme for the read-only "as it was before IronBase touched it" side of a diff. */
 const ORIGINAL_SCHEME = "ironbase-original";
@@ -537,8 +542,29 @@ export class ChatController {
         break;
 
       case "tool":
-        this.append({ kind: "tool", name: event.name, summary: event.summary });
+        this.append({
+          kind: "tool",
+          id: event.id,
+          name: event.name,
+          summary: event.summary,
+          note: event.note,
+          ok: event.ok,
+        });
         break;
+
+      case "toolEnd": {
+        // Patched in the thread as well as posted, or a panel reopened after
+        // the run would replay a row that is still spinning.
+        const item = this.thread.find(
+          (entry) => entry.kind === "tool" && entry.id === event.id,
+        );
+        if (item?.kind === "tool") {
+          item.note = event.note;
+          item.ok = event.ok;
+        }
+        this.post({ type: "toolEnd", id: event.id, note: event.note, ok: event.ok });
+        break;
+      }
 
       case "fileChange": {
         const change = event.change;
@@ -772,6 +798,29 @@ export class ChatController {
         void this.exportSession();
         break;
 
+      case "startReview":
+        void vscode.commands.executeCommand(
+          "ironbase.internal.review",
+          message.kind,
+          message.target,
+        );
+        break;
+
+      case "connectProvider":
+        // Same posture as the sidebar's: the pair carries arguments the command
+        // allowlist cannot, so it is checked against the real provider matrix
+        // before anything is dispatched rather than trusted for arriving typed.
+        if (isProvider(message.id) && supportsMethod(message.id, message.method)) {
+          void vscode.commands.executeCommand(
+            "ironbase.internal.connect",
+            message.id,
+            message.method,
+          );
+        } else {
+          log.warn(`Build panel asked to connect an unknown pair: ${message.id}/${message.method}`);
+        }
+        break;
+
       case "command":
         if (isAllowedCommand(message.command)) {
           void vscode.commands.executeCommand(message.command);
@@ -897,6 +946,10 @@ export class ChatController {
       providerLabel: client ? PROVIDER_LABELS[client.id] : undefined,
       providerId: client?.id,
       model: client?.model,
+      // Carried so the panel's own start page can offer the connect matrix
+      // rather than bouncing someone to the sidebar to sign in and back again.
+      connected: await this.deps.auth.availableProviders(),
+      sessionCapable: ALL_PROVIDERS.filter(canCaptureSession),
     });
   }
 

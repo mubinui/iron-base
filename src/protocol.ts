@@ -122,7 +122,21 @@ export interface SidebarState {
 
 // --- The build panel -------------------------------------------------------
 
+/** The two agents that own a thread in the panel. */
 export type ChatMode = "architect" | "build";
+
+/**
+ * The two whole-workspace runs, which end in the report rather than the thread.
+ *
+ * They sit in the composer's mode menu beside the agents because that is where
+ * someone looks for "what should IronBase do with what I am about to type" —
+ * but they are deliberately a separate type, so nothing that means "which agent
+ * is running" can ever be handed one of these.
+ */
+export type ReviewMode = "review" | "scalability";
+
+/** Everything the composer's mode menu can be set to. */
+export type ComposerMode = ChatMode | ReviewMode;
 
 /**
  * One entry in the thread.
@@ -134,7 +148,23 @@ export type ChatMode = "architect" | "build";
 export type ThreadItem =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool"; name: string; summary: string }
+  /**
+   * One step of the agent looking at the project.
+   *
+   * Emitted when the call starts and patched when it lands, which is what lets
+   * the trace show a row as running and then settle it with what it found
+   * rather than printing a line that says only that something was attempted.
+   */
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      summary: string;
+      /** What it found — "218 lines", "6 matches". Absent while it runs. */
+      note?: string;
+      /** Undefined until it lands; false when the call came back an error. */
+      ok?: boolean;
+    }
   | {
       kind: "change";
       id: string;
@@ -197,6 +227,10 @@ export interface ChatState {
   /** Empty when nothing is signed in — the panel says so instead of a composer. */
   providerLabel?: string;
   providerId?: ProviderId;
+  /** Every account with a stored credential, for the start page's matrix. */
+  connected?: ProviderId[];
+  /** Providers whose browser sign-in has been verified. See `SidebarState`. */
+  sessionCapable?: ProviderId[];
   model?: string;
   running: boolean;
   agent: ChatMode;
@@ -229,6 +263,8 @@ export type ChatHostMessage =
   | { type: "assistantDelta"; delta: string }
   | { type: "commandOutput"; id: string; chunk: string }
   | { type: "commandEnd"; id: string; status: string; ok: boolean }
+  /** Settles a trace row that was drawn as running. */
+  | { type: "toolEnd"; id: string; note?: string; ok: boolean }
   | { type: "todos"; todos: Todo[] }
   | { type: "permission"; request: PermissionCard }
   /** Takes the card off screen — answered, cancelled, or the run ended. */
@@ -254,4 +290,14 @@ export type ChatWebviewMessage =
   | { type: "newSession" }
   | { type: "switchSession" }
   | { type: "exportSession" }
+  /**
+   * Starts one of the whole-workspace runs from the composer.
+   *
+   * `target` is the load description a scalability check needs; the host is
+   * what decides whether an empty one is worth asking about, because only it
+   * can put a prompt on screen.
+   */
+  | { type: "startReview"; kind: ReviewMode; target?: string }
+  /** Connects an account from the panel's own start page. See `WebviewMessage`. */
+  | { type: "connectProvider"; id: ProviderId; method: AuthMethod }
   | { type: "command"; command: AllowedCommand };
