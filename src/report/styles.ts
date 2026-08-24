@@ -1523,6 +1523,20 @@ body.vscode-high-contrast { --ink: color-mix(in srgb, var(--vscode-foreground) 7
    step between them stays the same size wherever the primary lands. */
 body { --ink-muted: color-mix(in srgb, var(--ink) 84%, transparent); }
 
+/*
+ * The controls run larger than the sidebar's.
+ *
+ * These are pointed at with a mouse while reading, not scanned down a list, and
+ * they were sized like a status bar. Everything here clears the 24px a pointer
+ * target wants, and the round send button leads.
+ */
+.icon-button { width: 30px; height: 30px; border-radius: 8px; }
+.composer-bar .icon-button { width: 32px; height: 32px; }
+.bar-chip { gap: 0.4rem; padding: 0.42rem 0.7rem; font-size: 12.5px; }
+.model-pick { gap: 0.4rem; padding: 0.42rem 0.65rem; font-size: 12.5px; }
+.circle-btn { width: 34px; height: 34px; }
+.back-btn { width: 30px; height: 30px; }
+
 /* The shared button and sign-in blocks are written at the sidebar's scale.
    The conversation is read, not scanned, so it runs a step larger — and a
    12px button label under 15px prose reads as a mistake. */

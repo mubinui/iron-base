@@ -390,7 +390,7 @@ function iconButton(label: string, glyph: IconName, onClick: () => void): HTMLEl
   const node = el("button", undefined, "icon-button");
   node.title = label;
   node.setAttribute("aria-label", label);
-  node.append(icon(glyph, 14));
+  node.append(icon(glyph, 16));
   node.addEventListener("click", onClick);
   return node;
 }
@@ -790,12 +790,11 @@ function renderComposer(): void {
 
   const bar = el("div", undefined, "composer-bar");
 
-  // Left: the two things you set before sending.
-  bar.append(
-    iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
-  );
-
-  // Only where what you type is a request. A whole-project review takes no
+  // Attaching leads. Starting a new build lives in the header, where the rest
+  // of the session controls are; a second plus down here was the same action
+  // twice on one screen, and it sat in the slot people reach for to add a file.
+  //
+  // Only where what you type is a request: a whole-project review takes no
   // brief, so there is nothing for an attachment to attach to.
   if (spec.brief === "task") {
     bar.append(
@@ -806,7 +805,7 @@ function renderComposer(): void {
   }
 
   const modeButton = el("button", undefined, "bar-chip mode-pick");
-  modeButton.append(icon(spec.glyph, 13), el("span", spec.label), icon("chevron", 10, "caret"));
+  modeButton.append(icon(spec.glyph, 15), el("span", spec.label), icon("chevron", 11, "caret"));
   modeButton.title = `${spec.label} — ${spec.blurb}\nClick to choose what IronBase does with what you type.`;
   modeButton.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -819,7 +818,7 @@ function renderComposer(): void {
   if (spec.kind === "agent") {
     const approve = el("button", undefined, `bar-chip${state.autoAcceptEdits ? " on" : ""}`);
     approve.append(
-      icon(state.autoAcceptEdits ? "check" : "signIn", 13),
+      icon(state.autoAcceptEdits ? "check" : "signIn", 15),
       el("span", state.autoAcceptEdits ? "Approve for me" : "Ask me"),
     );
     approve.title = state.autoAcceptEdits
@@ -836,7 +835,7 @@ function renderComposer(): void {
   const model = document.createElement("button");
   model.className = "model-pick";
   model.append(
-    icon(state.providerId ? (PROVIDER_ICONS[state.providerId] as IconName) : "key", 12),
+    icon(state.providerId ? (PROVIDER_ICONS[state.providerId] as IconName) : "key", 14),
     el("span", state.model || "Choose a model"),
   );
   // Deliberately live during a run. The loop re-resolves the account before
@@ -856,14 +855,14 @@ function renderComposer(): void {
     const stop = el("button", undefined, "circle-btn stop");
     stop.title = "Stop";
     stop.setAttribute("aria-label", "Stop");
-    stop.append(icon("stopCircle", 15));
+    stop.append(icon("stopCircle", 17));
     stop.addEventListener("click", () => vscode.postMessage({ type: "stop" }));
     bar.append(stop);
   } else {
     const sendButton = el("button", undefined, "circle-btn send");
     sendButton.title = spec.action;
     sendButton.setAttribute("aria-label", spec.action);
-    sendButton.append(icon(spec.kind === "agent" ? "send" : "play", 15));
+    sendButton.append(icon(spec.kind === "agent" ? "send" : "play", 17));
     sendButton.addEventListener("click", send);
     bar.append(sendButton);
   }
