@@ -1,5 +1,7 @@
 # IronBase
 
+![IronBase — it reads your architecture before it writes your code](https://raw.githubusercontent.com/mubinui/iron-base/main/docs/linkedin-poster.png)
+
 A VS Code coding agent that starts by understanding your **architecture**.
 
 Most coding agents open your project cold and grep their way in. IronBase builds a local
@@ -41,6 +43,27 @@ What that gets you:
 
 Findings also land in the Problems panel, and the whole report exports to Markdown with
 the patches as fenced diffs.
+
+## How it works
+
+![Map, plan, you approve, build, verify — and every write is reversible](https://raw.githubusercontent.com/mubinui/iron-base/main/docs/workflow.png)
+
+A build runs in five stages, and you are the gate between the third and the fourth. The
+architect that produces the plan **cannot write to your files** — the write tools are not
+in its list, so that is a fact about the request rather than a promise in a prompt. Once
+you approve, the builder works the plan as a live task list and every edit arrives as a
+diff you allow or reject.
+
+Underneath all of it, nothing is irreversible: before the first write to any file
+IronBase keeps a copy, so **Undo** puts one change back and **Revert Changes from This
+Build** puts back all of them. If it cannot take that snapshot, it refuses the write
+rather than making a change it could not reverse.
+
+The other half of the product does not write anything at all. **Analyze architecture**
+reviews the whole project — what will hurt as it grows, each with a real file and line, a
+dependency map, and one-click patches. **Scalability check** takes a load you name and
+estimates what the code handles today, ranks what caps it, and lays out a phased plan.
+Both are in the composer's mode menu, next to the two build modes.
 
 ## Building something
 

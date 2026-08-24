@@ -18,6 +18,10 @@ const TOKENS = `
   --sev-low: #7c8899;
   --sev-info: #8a8a8a;
   --good: #1aa251;
+  /* Work done by something other than the agent itself — a delegated search, an
+     MCP server. Fixed, and deliberately not the brand: the brand is a blue now,
+     and the trace already spends blue on searching. */
+  --tone-external: #8b5cf6;
 
   --accent: var(--vscode-textLink-foreground, #3b9eff);
   --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -29,9 +33,9 @@ const TOKENS = `
      shows the user's own code stays theme-derived so it still reads natively.
      The pair holds its contrast on light and dark alike, which is why the
      identity can be a constant rather than two. */
-  --brand-1: #7b6cff;
-  --brand-2: #c15cff;
-  --brand-accent: #8a7bff;
+  --brand-1: #0f5e9c;
+  --brand-2: #31a8f0;
+  --brand-accent: #3ba3ee;
   --brand-contrast: #ffffff;
   --brand-soft: color-mix(in srgb, var(--brand-1) 15%, transparent);
 
@@ -1521,9 +1525,9 @@ button.meter.changed { color: var(--sev-medium); }
   background: color-mix(in srgb, var(--accent) 9%, var(--vscode-editor-background));
 }
 .trace-row.tone-agent .chip {
-  color: var(--brand-accent);
-  border-color: color-mix(in srgb, var(--brand-accent) 32%, transparent);
-  background: color-mix(in srgb, var(--brand-accent) 10%, var(--vscode-editor-background));
+  color: var(--tone-external);
+  border-color: color-mix(in srgb, var(--tone-external) 32%, transparent);
+  background: color-mix(in srgb, var(--tone-external) 10%, var(--vscode-editor-background));
 }
 .trace-row.bad .chip {
   color: var(--sev-critical);

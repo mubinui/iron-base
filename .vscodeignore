@@ -11,4 +11,7 @@ esbuild.mjs
 tsconfig.json
 tsconfig.webview.json
 **/*.map
+# Marketing artwork. The README points at these by absolute raw URL — the
+# Marketplace does not resolve relative image paths — so they never need to ship.
+docs/**
 .gitignore

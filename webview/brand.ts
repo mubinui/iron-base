@@ -57,10 +57,13 @@ export function brandMark(size = 26): HTMLElement {
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));
   svg.setAttribute("aria-hidden", "true");
+  // The same coordinates as media/icon.svg and scripts/generate-icon.py, which
+  // is what keeps one silhouette across the activity bar, the Marketplace tile
+  // and this hero.
   const tiers: Array<[number, number, number, number, number]> = [
-    [8.5, 4, 7, 3.6, 1.3],
-    [6, 10, 12, 3.6, 1.3],
-    [3.5, 16, 17, 4, 1.5],
+    [7, 4, 10, 3.9, 1.5],
+    [5, 10.2, 14, 3.9, 1.6],
+    [3.5, 16.4, 17, 4.2, 1.8],
   ];
   for (const [x, y, w, h, r] of tiers) {
     const rect = document.createElementNS(SVG_NS, "rect");
