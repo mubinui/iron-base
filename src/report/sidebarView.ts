@@ -31,7 +31,6 @@ function isProvider(value: unknown): value is ProviderId {
   return typeof value === "string" && (ALL_PROVIDERS as string[]).includes(value);
 }
 import { createNonce } from "./reportPanel";
-import { SIDEBAR_STYLES } from "./styles";
 
 export type SidebarScreen = "home" | "build";
 
@@ -251,7 +250,6 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${SIDEBAR_STYLES}</style>
 </head>
 <body>
 <div id="root"></div>

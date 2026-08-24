@@ -50,7 +50,7 @@ export const FEATURED: ProviderId[] = [
  * from CSS, and the tiers are flat white — no gradient inside the glyph itself,
  * which keeps it crisp at any size.
  */
-export function brandMark(size = 26): HTMLElement {
+export function brandMark(size = 51): HTMLElement {
   const tile = el("div", undefined, "brand-tile");
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");

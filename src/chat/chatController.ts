@@ -40,7 +40,6 @@ import {
 } from "./sessionStore";
 import { scanWorkspace } from "../scanner/workspaceScanner";
 import { createNonce } from "../report/reportPanel";
-import { CHAT_STYLES } from "../report/styles";
 import { ALL_PROVIDERS, PROVIDER_LABELS, supportsMethod, type ProviderId } from "../llm/types";
 import { canCaptureSession } from "../llm/webSessions";
 import { log } from "../util/log";

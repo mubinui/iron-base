@@ -54,7 +54,7 @@ LAYERS = [
 # How much of the tile the mark covers edge to edge. Tuned by eye against
 # the rounded corners: much past this the widest tier crowds them, and much
 # under it the tile goes back to reading as mostly empty colour.
-FILL = 0.70
+FILL = 0.78
 
 # How far the mark floats above the ground, and how soft its shadow is, in
 # 24-unit-space pixels before supersampling.

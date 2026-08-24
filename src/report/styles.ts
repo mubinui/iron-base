@@ -33,6 +33,7 @@ const TOKENS = `
      shows the user's own code stays theme-derived so it still reads natively.
      The pair holds its contrast on light and dark alike, which is why the
      identity can be a constant rather than two. */
+  --brand-0: #111c2e;
   --brand-1: #0f5e9c;
   --brand-2: #31a8f0;
   --brand-accent: #3ba3ee;
@@ -923,8 +924,11 @@ const SIGN_IN = `
   margin: 0 auto 14px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  /* The same three stops as media/icon.png, in the same direction, so the mark
+     in the panel and the tile on the Marketplace are recognisably one thing. */
+  background: linear-gradient(135deg, var(--brand-0), var(--brand-1) 52%, var(--brand-2));
   box-shadow: 0 10px 26px -10px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  overflow: hidden;
 }
 .wordmark {
   display: inline-flex;
@@ -1124,79 +1128,167 @@ p { margin: 0 0 10px; }
 
 /* ---- Signed-in home ---- */
 /*
- * The mark, small, above the day-to-day actions. Signed in, this screen is
- * opened every day; it identifies itself and then gets out of the way.
+ * The panel someone opens every day, in about 320px.
+ *
+ * Depth is what separates this from a settings list: the masthead sits on its
+ * own tinted surface with a glow behind the mark, the one action that matters
+ * carries the brand gradient and a real shadow, and everything below it steps
+ * down in weight rather than repeating the same grey box. Nothing here invents
+ * a number or a status the host does not actually know.
  */
-.home-head {
+.masthead {
+  position: relative;
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 9px;
-  padding-bottom: 16px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid var(--hairline);
+  padding: 22px 14px 20px;
+  margin-bottom: 18px;
+  border-radius: 16px;
+  border: 1px solid var(--hairline);
+  background:
+    radial-gradient(120% 90% at 50% -10%, color-mix(in srgb, var(--brand-2) 18%, transparent), transparent 70%),
+    var(--surface);
+  overflow: hidden;
 }
-.home-head .brand-tile {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
+/* A soft brand light above the mark, so the panel opens on something with
+   presence rather than on a row of buttons. */
+.masthead::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -46px;
+  width: 190px;
+  height: 130px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--brand-2) 34%, transparent), transparent 68%);
+  pointer-events: none;
+}
+.masthead .brand-tile,
+.masthead .wordmark,
+.masthead .tagline { position: relative; }
+.masthead .brand-tile {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
   margin: 0;
-  box-shadow: 0 5px 14px -6px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.22);
 }
-.home-head .wordmark { margin: 0; font-size: 13px; letter-spacing: 0.2em; }
+.masthead .wordmark { margin: 0; font-size: 15px; letter-spacing: 0.26em; }
+.masthead .tagline {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+/* A label with the rule running off it, rather than a word floating alone. */
+.section-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 20px 0 9px;
+}
+.section-rule .label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.section-rule .rule { flex: 1 1 auto; height: 1px; background: var(--hairline); }
 
 /* One thing it can do, and the sentence that says why you would press it. */
 .tile {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 11px;
+  gap: 12px;
   width: 100%;
   text-align: left;
-  padding: 12px 12px 13px;
-  margin-bottom: 8px;
-  border-radius: 12px;
+  padding: 13px 13px 14px;
+  margin-bottom: 9px;
+  border-radius: 14px;
   border: 1px solid var(--hairline);
   background: var(--surface);
   color: var(--ink);
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 .tile:hover {
   background: var(--surface-raised);
   border-color: color-mix(in srgb, var(--brand-accent) 55%, transparent);
+  box-shadow: 0 8px 22px -14px var(--brand-1);
+  transform: translateY(-1px);
 }
-.tile:active { transform: translateY(0.5px); }
+.tile:active { transform: translateY(0); }
 .tile .mark {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
   color: var(--brand-accent);
   border: 1px solid color-mix(in srgb, var(--brand-accent) 30%, transparent);
-  background: color-mix(in srgb, var(--brand-accent) 11%, transparent);
+  background: color-mix(in srgb, var(--brand-accent) 12%, transparent);
 }
-.tile .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.tile .name { font-weight: 600; font-size: 13px; letter-spacing: -0.005em; }
-.tile .line { color: var(--ink-muted); font-size: 11.5px; line-height: 1.42; }
-.tile .go { flex: 0 0 auto; color: var(--ink-muted); opacity: 0.5; margin-top: 8px; }
-.tile:hover .go { opacity: 1; color: var(--brand-accent); }
+.tile .body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.tile .name { font-weight: 650; font-size: 13px; letter-spacing: -0.008em; }
+.tile .line { color: var(--ink-muted); font-size: 11.5px; line-height: 1.45; }
+.tile .go {
+  flex: 0 0 auto;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--ink-muted);
+  background: color-mix(in srgb, var(--vscode-editor-foreground) 7%, transparent);
+  transition: background 150ms ease, color 150ms ease, transform 150ms ease;
+}
+.tile:hover .go {
+  color: var(--brand-contrast);
+  background: var(--brand-accent);
+  transform: translateX(2px);
+}
 
-/* The one action the screen exists for. */
+/* The one action the screen exists for, and it should look like it. */
 .tile.primary {
   border-color: transparent;
   color: var(--brand-contrast);
-  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
-  box-shadow: 0 10px 24px -12px var(--brand-1);
+  background: linear-gradient(135deg, var(--brand-0), var(--brand-1) 48%, var(--brand-2));
+  box-shadow: 0 14px 30px -14px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  padding: 15px 14px 16px;
 }
-.tile.primary:hover { filter: brightness(1.06); border-color: transparent; }
+.tile.primary:hover {
+  border-color: transparent;
+  filter: brightness(1.07);
+  box-shadow: 0 18px 34px -14px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
 .tile.primary .mark {
   color: var(--brand-contrast);
-  border-color: rgba(255, 255, 255, 0.34);
-  background: rgba(255, 255, 255, 0.17);
+  border-color: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.18);
 }
-.tile.primary .line { color: rgba(255, 255, 255, 0.85); }
-.tile.primary .go { color: var(--brand-contrast); opacity: 0.8; }
-.tile.primary:hover .go { color: var(--brand-contrast); opacity: 1; }
+.tile.primary .name { font-size: 13.5px; }
+.tile.primary .line { color: rgba(255, 255, 255, 0.86); }
+.tile.primary .go { color: var(--brand-contrast); background: rgba(255, 255, 255, 0.2); }
+.tile.primary:hover .go { background: rgba(255, 255, 255, 0.3); color: var(--brand-contrast); }
+
+/* The tail: real actions, but none of them the reason you opened the panel. */
+.link-group {
+  display: flex;
+  flex-direction: column;
+  margin-top: 14px;
+  padding: 4px 2px;
+  border-radius: 12px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-sunken);
+}
+.link-group .link { border-radius: 8px; padding: 7px 9px; }
+.link-group .link:hover { background: var(--surface-raised); }
 
 .account {
   display: flex;

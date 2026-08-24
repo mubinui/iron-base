@@ -24,14 +24,32 @@ import type {
   ThreadItem,
 } from "../src/protocol";
 import { formatCost } from "../src/llm/modelLimits";
+import { CHAT_STYLES } from "../src/report/styles";
 import { connectMatrix, hero, keychainFootnote } from "./brand";
 import { icon, PROVIDER_ICONS, type IconName } from "./icons";
 import { renderMarkdown } from "./markdown";
 
 declare function acquireVsCodeApi(): { postMessage(message: ChatWebviewMessage): void };
 
+/**
+ * The stylesheet ships inside this bundle, not in the page the host writes.
+ *
+ * The host used to inline it from its own memory while this script was loaded
+ * from disk, so installing an update under a running window served the new
+ * script with the old CSS — and unstyled tiles collapse into a run of text
+ * that looks nothing like the product. Same file, same bundle, no way to
+ * disagree.
+ */
+function applyStyles(css: string): void {
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.append(style);
+}
+
 const vscode = acquireVsCodeApi();
 const root = document.getElementById("root")!;
+
+applyStyles(CHAT_STYLES);
 
 const EXAMPLES = [
   "Move session storage out of process memory so the app can run on more than one instance",

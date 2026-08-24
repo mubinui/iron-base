@@ -13,6 +13,7 @@ import {
   type ProviderId,
 } from "../src/llm/types";
 import type { AllowedCommand, HostMessage, SidebarState, WebviewMessage } from "../src/protocol";
+import { SIDEBAR_STYLES } from "../src/report/styles";
 import {
   brandMark,
   capabilityList,
@@ -26,8 +27,25 @@ import { icon, PROVIDER_ICONS, type IconName } from "./icons";
 
 declare function acquireVsCodeApi(): { postMessage(message: WebviewMessage): void };
 
+/**
+ * The stylesheet ships inside this bundle, not in the page the host writes.
+ *
+ * The host used to inline it from its own memory while this script was loaded
+ * from disk, so installing an update under a running window served the new
+ * script with the old CSS — and unstyled tiles collapse into a run of text
+ * that looks nothing like the product. Same file, same bundle, no way to
+ * disagree.
+ */
+function applyStyles(css: string): void {
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.append(style);
+}
+
 const vscode = acquireVsCodeApi();
 const root = document.getElementById("root")!;
+
+applyStyles(SIDEBAR_STYLES);
 
 /**
  * Derived from the engine's own provider list rather than written out again
@@ -176,6 +194,12 @@ function signedOut(state: SidebarState): HTMLElement[] {
   return out;
 }
 
+function sectionRule(text: string): HTMLElement {
+  const row = el("div", undefined, "section-rule");
+  row.append(el("span", text, "label"), el("span", undefined, "rule"));
+  return row;
+}
+
 function sectionLabel(text: string): HTMLElement {
   return el("h2", text, "section");
 }
@@ -210,11 +234,13 @@ function connected(state: SidebarState): HTMLElement[] {
 
   const out: HTMLElement[] = [];
 
-  // The mark, small. Signed in, this is the screen someone opens every day, so
-  // it identifies itself and gets out of the way rather than re-pitching the
-  // product at them — that job belongs to the signed-out screen.
-  const head = el("div", undefined, "home-head");
-  head.append(brandMark(17), wordmark());
+  // The masthead. Signed in, this is the screen someone opens every day, so it
+  // identifies itself and states the one idea the product is about — and then
+  // gets out of the way. Re-pitching to someone who has already signed in is
+  // the signed-out screen's job, not this one's.
+  const head = el("div", undefined, "masthead");
+  head.append(brandMark(), wordmark());
+  head.append(el("p", "Architecture-first coding agent", "tagline"));
   out.push(head);
 
   // Build leads: reviewing tells you what is wrong, building is what fixes it,
@@ -231,7 +257,7 @@ function connected(state: SidebarState): HTMLElement[] {
     ),
   );
 
-  out.push(el("h2", "Review the whole project"));
+  out.push(sectionRule("Review the whole project"));
   out.push(
     actionTile(
       "Analyze architecture",
@@ -275,28 +301,31 @@ function connected(state: SidebarState): HTMLElement[] {
     out.push(linkButton("Export as Markdown", "download", "ironbase.exportReport"));
   }
 
-  out.push(el("h2", "Account"));
+  out.push(sectionRule("Account"));
   const connectedIds = new Set(state.connected ?? []);
   for (const account of ACCOUNTS) {
     if (!connectedIds.has(account.id) && account.id !== state.providerId) continue;
     out.push(accountCard(account, true, account.id === state.providerId));
   }
   out.push(el("p", describeAccount(state), "muted"));
-  out.push(linkButton("Change model", "switchAccount", "ironbase.chooseModel"));
+
+  const links = el("div", undefined, "link-group");
+  links.append(linkButton("Change model", "switchAccount", "ironbase.chooseModel"));
 
   // Always the picker, never a guess: jumping straight into whichever provider
   // happened to be first in the list meant "connect another account" started a
   // ChatGPT sign-in for someone who wanted Gemini.
   if (ACCOUNTS.some((a) => !connectedIds.has(a.id) && a.id !== state.providerId)) {
-    out.push(linkButton("Connect another account", "signIn", CONNECT));
+    links.append(linkButton("Connect another account", "signIn", CONNECT));
   }
-  out.push(linkButton("Rebuild project index", "refresh", "ironbase.clearIndex"));
+  links.append(linkButton("Rebuild project index", "refresh", "ironbase.clearIndex"));
   // Disconnecting one account is the common case; wiping every credential is
   // the rare one, so it goes second.
   if (connectedIds.size > 1) {
-    out.push(linkButton("Disconnect an account", "signOut", "ironbase.signOutProvider"));
+    links.append(linkButton("Disconnect an account", "signOut", "ironbase.signOutProvider"));
   }
-  out.push(linkButton("Sign out of everything", "signOut", "ironbase.signOut"));
+  links.append(linkButton("Sign out of everything", "signOut", "ironbase.signOut"));
+  out.push(links);
   return out;
 }
 

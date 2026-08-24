@@ -13,7 +13,6 @@
 import * as vscode from "vscode";
 import { ChatController, type ChatPanelDeps, type ChatSurface } from "./chatController";
 import { createNonce } from "../report/reportPanel";
-import { CHAT_STYLES } from "../report/styles";
 import type { ChatHostMessage, ChatWebviewMessage } from "../protocol";
 
 export class ChatPanel implements ChatSurface {
@@ -98,7 +97,6 @@ export function html(webview: vscode.Webview, extensionUri: vscode.Uri): string 
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${CHAT_STYLES}</style>
 </head>
 <body>
 <div id="root"></div>
