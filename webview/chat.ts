@@ -897,8 +897,11 @@ function attachmentRail(): HTMLElement {
   return rail;
 }
 
+/** The chip shows the file's name; its full path is the tooltip. Attachments
+    from outside the workspace arrive as absolute paths, which on Windows are
+    separated the other way. */
 function basename(file: string): string {
-  const cut = file.lastIndexOf("/");
+  const cut = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
   return cut === -1 ? file : file.slice(cut + 1);
 }
 

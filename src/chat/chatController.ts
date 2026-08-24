@@ -45,7 +45,6 @@ import { canCaptureSession } from "../llm/webSessions";
 import { describeError, log } from "../util/log";
 import * as path from "node:path";
 import { relativeTo, resolveInside } from "../util/paths";
-import { NOISE_GLOB } from "../engine/tools";
 import {
   type ChatHostMessage,
   type ChatState,
@@ -56,25 +55,12 @@ import {
   isAllowedCommand,
 } from "../protocol";
 
-/**
- * Names the attached files at the top of the request.
- *
- * Plain prose rather than a fenced block or a pasted dump: the model reads the
- * request as a sentence, and it has `read_file` to open what it is pointed at.
- */
-function withAttachments(text: string, attachments?: string[]): string {
-  if (!attachments || attachments.length === 0) return text;
-  const list = attachments.map((file) => `\`${file}\``).join(", ");
-  const lead =
-    attachments.length === 1
-      ? `Start from ${list}.`
-      : `Start from these files: ${list}.`;
-  return text.trim().length > 0 ? `${lead}\n\n${text}` : lead;
-}
-
 function isProvider(value: unknown): value is ProviderId {
   return typeof value === "string" && (ALL_PROVIDERS as readonly string[]).includes(value);
 }
+
+/** The most text an out-of-workspace attachment may add to one request. */
+const MAX_ATTACHMENT_BYTES = 128 * 1024;
 
 /** Scheme for the read-only "as it was before IronBase touched it" side of a diff. */
 const ORIGINAL_SCHEME = "ironbase-original";
@@ -186,6 +172,14 @@ export class ChatController {
   private pendingRestore: StoredSession | undefined;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly mcp = new McpRegistry();
+  /**
+   * Text of attached files from outside the workspace, by absolute path.
+   *
+   * They cannot be read by the agent — every read tool is fenced to the folder
+   * — so their content travels with the request that names them and is dropped
+   * once it has gone.
+   */
+  private readonly carried = new Map<string, string>();
   /** The index the session reads and writes; kept so builds can be remembered. */
   private index: Awaited<ReturnType<IndexStore["load"]>> | undefined;
 
@@ -732,7 +726,7 @@ export class ChatController {
         void (async () => {
           const session = await this.ensureSession();
           this.streaming = false;
-          await session?.send(withAttachments(message.text, message.attachments), message.mode);
+          await session?.send(this.composeRequest(message.text, message.attachments), message.mode);
         })();
         break;
 
@@ -903,48 +897,61 @@ export class ChatController {
    * path the agent is structurally unable to open. Saying so beats attaching
    * something that silently fails on the first read.
    */
-  /** Also reachable from the palette, which is how a dead button gets diagnosed. */
+  /** Also reachable from the palette, and by keyboard. */
   async attachFiles(): Promise<void> {
     await this.pickFiles();
   }
 
-  private async pickFiles(): Promise<void> {
-    log.info("Attach: opening the picker.");
-    // A quick pick rather than the native dialog. The dialog is a separate
-    // window, and one opened from a focused webview can end up behind VS Code
-    // on macOS — which looks exactly like a button that does nothing. This
-    // renders inside the editor, is searchable, and is scoped to the workspace
-    // by construction, which is the same fence every read tool sits behind.
-    const found = await vscode.workspace.findFiles(
-      new vscode.RelativePattern(this.folder, "**/*"),
-      NOISE_GLOB,
-      4000,
-    );
-    const items: Array<vscode.QuickPickItem & { file?: string }> = found
-      .map((uri) => relativeTo(this.folder.uri, uri))
-      .filter((rel) => !rel.startsWith("..") && !path.isAbsolute(rel))
-      .sort((a, b) => a.localeCompare(b))
-      .map((rel) => ({ label: path.basename(rel), description: path.dirname(rel), file: rel }));
+  /**
+   * Browse for files to give the agent.
+   *
+   * The system dialog, not a quick pick. A quick pick opens at the top of the
+   * window and lists the workspace, which is neither what a clip means nor
+   * where anyone looks for it — "attach" means browse, and it should look like
+   * every other attach control on the machine.
+   *
+   * What happens next depends on where the file came from. Inside the
+   * workspace, only the path travels: the agent has read_file and should
+   * decide how much of it to open. Outside, it cannot — every read tool is
+   * fenced to the folder — so the text is read here and carried with the
+   * request instead. Neither case copies anything into the repo.
+   */
+  /**
+   * Builds the request the agent actually receives.
+   *
+   * Workspace files are named and left to `read_file`, which lets the agent
+   * open only the part it needs. Files from outside are inlined, because it has
+   * no tool that can reach them — that content is spent whether it is used or
+   * not, which is why only these are pasted.
+   */
+  private composeRequest(text: string, attachments?: string[]): string {
+    if (!attachments || attachments.length === 0) return text;
 
-    const BROWSE = "$(folder-opened)  Browse…";
-    const chosen = await vscode.window.showQuickPick(
-      [{ label: BROWSE, detail: "Pick from anywhere on disk" }, ...items],
-      {
-        canPickMany: true,
-        matchOnDescription: true,
-        placeHolder: `Attach files from ${this.folder.name} — type to filter, Space to select`,
-      },
-    );
-    if (!chosen || chosen.length === 0) return;
-
-    const quick = chosen.map((item) => item.file).filter((f): f is string => f !== undefined);
-    if (quick.length > 0) {
-      this.post({ type: "filesPicked", files: quick });
-      log.info(`Attach: ${quick.join(", ")}`);
+    const named: string[] = [];
+    const blocks: string[] = [];
+    for (const file of attachments) {
+      const carried = this.carried.get(file);
+      if (carried === undefined) {
+        named.push(file);
+        continue;
+      }
+      const name = path.basename(file);
+      blocks.push(`--- ${name} (attached, outside the workspace) ---\n${carried}`);
     }
-    if (!chosen.some((item) => item.label === BROWSE)) return;
+    this.carried.clear();
 
-    // The escape hatch, for a file the index has not seen yet.
+    const parts: string[] = [];
+    if (named.length > 0) {
+      const list = named.map((file) => `"${file}"`).join(", ");
+      parts.push(named.length === 1 ? `Start from ${list}.` : `Start from these files: ${list}.`);
+    }
+    if (blocks.length > 0) parts.push(blocks.join("\n\n"));
+    if (text.trim().length > 0) parts.push(text);
+    return parts.join("\n\n");
+  }
+
+  private async pickFiles(): Promise<void> {
+    log.info("Attach: opening the system dialog.");
     let picked: vscode.Uri[] | undefined;
     try {
       picked = await vscode.window.showOpenDialog({
@@ -956,38 +963,67 @@ export class ChatController {
         title: "Attach files for IronBase to read",
       });
     } catch (err) {
-      // A dialog that cannot open is the one failure mode with no symptom on
-      // screen at all — the clip looks broken and nothing says why.
       log.error("Could not open the attach dialog", err);
       void vscode.window.showErrorMessage(`Could not open the file picker: ${describeError(err)}`);
       return;
     }
-    log.info(`Attach: picked ${picked?.length ?? 0} file(s).`);
-    if (!picked || picked.length === 0) return;
+    if (!picked || picked.length === 0) {
+      log.info("Attach: cancelled.");
+      return;
+    }
 
-    const inside: string[] = [];
-    const outside: string[] = [];
+    const labels: string[] = [];
+    const unreadable: string[] = [];
     for (const uri of picked) {
       const rel = relativeTo(this.folder.uri, uri);
-      if (rel.startsWith("..") || path.isAbsolute(rel)) outside.push(uri.fsPath);
-      else inside.push(rel);
+      const isInside = !rel.startsWith("..") && !path.isAbsolute(rel);
+      if (isInside) {
+        labels.push(rel);
+        continue;
+      }
+      const carried = await this.carryOutsideFile(uri);
+      if (carried) labels.push(uri.fsPath);
+      else unreadable.push(path.basename(uri.fsPath));
     }
 
-    if (inside.length > 0) {
-      this.post({ type: "filesPicked", files: inside });
-      log.info(`Attach: ${inside.join(", ")}`);
+    if (labels.length > 0) {
+      this.post({ type: "filesPicked", files: labels });
+      log.info(`Attach: ${labels.join(", ")}`);
     }
-
-    // Every read tool is fenced to the workspace, so a file from elsewhere is a
-    // path the agent is structurally unable to open. Saying which ones were
-    // dropped beats a clip that appears to do nothing.
-    if (outside.length > 0) {
-      const names = outside.map((file) => path.basename(file)).join(", ");
+    if (unreadable.length > 0) {
       void vscode.window.showWarningMessage(
-        inside.length === 0
-          ? `Nothing attached. IronBase can only read files inside ${this.folder.name}, and ${names} ${outside.length === 1 ? "is" : "are"} outside it.`
-          : `${names} left out — IronBase can only read inside ${this.folder.name}.`,
+        `Could not attach ${unreadable.join(", ")}. IronBase reads text — images and ` +
+          "binary documents are not supported yet.",
       );
+    }
+  }
+
+  /**
+   * Reads a file from outside the workspace so its text can ride with the
+   * request, and returns whether it could.
+   *
+   * Capped, because this goes into the prompt whole rather than being opened on
+   * demand like a workspace file. Binary is refused outright: a model handed
+   * decoded PNG bytes does not fail, it hallucinates about them.
+   */
+  private async carryOutsideFile(uri: vscode.Uri): Promise<boolean> {
+    try {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+        void vscode.window.showWarningMessage(
+          `${path.basename(uri.fsPath)} is too large to attach from outside the workspace ` +
+            `(over ${Math.round(MAX_ATTACHMENT_BYTES / 1024)}KB). Copy it into the project instead.`,
+        );
+        return false;
+      }
+      // A NUL in the first few KB is the cheap, reliable tell for binary.
+      const head = bytes.subarray(0, 8192);
+      if (head.includes(0)) return false;
+      this.carried.set(uri.fsPath, Buffer.from(bytes).toString("utf8"));
+      return true;
+    } catch (err) {
+      log.warn(`Attach: could not read ${uri.fsPath}: ${describeError(err)}`);
+      return false;
     }
   }
 
