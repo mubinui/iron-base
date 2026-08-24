@@ -955,6 +955,51 @@ const SIGN_IN = `
   max-width: 31ch;
 }
 
+/* ---- What it does ---- */
+/*
+ * Compact by necessity: a docked sidebar is often under 300px, so each claim is
+ * a mark, a bold line and one sentence, and nothing here may depend on width.
+ */
+.capabilities { display: flex; flex-direction: column; gap: 11px; }
+.capability { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.capability .mark {
+  flex: 0 0 auto;
+  width: 27px;
+  height: 27px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--brand-accent);
+  border: 1px solid color-mix(in srgb, var(--brand-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--brand-accent) 11%, transparent);
+}
+.capability .body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.capability .name { font-weight: 600; font-size: 12.5px; letter-spacing: -0.005em; }
+.capability .line { color: var(--ink-muted); font-size: 11.5px; line-height: 1.42; }
+
+/* The claim that gets missed if it is left to be discovered. */
+.value-note {
+  margin-top: 16px;
+  padding: 12px 13px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--brand-accent) 26%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--brand-1) 15%, transparent),
+    color-mix(in srgb, var(--brand-2) 8%, transparent)
+  );
+}
+.value-note .head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-weight: 650;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+.value-note .head svg { flex: 0 0 auto; color: var(--brand-accent); }
+.value-note p { margin: 6px 0 0; color: var(--ink-muted); font-size: 11.5px; line-height: 1.45; }
+
 /* ---- Connect matrix ---- */
 
 .connect-grid { display: flex; flex-direction: column; gap: 7px; }

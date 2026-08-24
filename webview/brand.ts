@@ -136,6 +136,72 @@ export function connectMatrix(
   return out;
 }
 
+/**
+ * What the product does, before it asks for anything.
+ *
+ * The first screen used to go straight from a one-line pitch to a wall of
+ * sign-in buttons, which asks someone to connect an account before telling them
+ * what it would do with one. Four claims, each one line, each answerable by the
+ * rest of the README — no numbers, no badges, nothing that is not a capability.
+ */
+const CAPABILITIES: Array<{ glyph: IconName; title: string; line: string }> = [
+  {
+    glyph: "compass",
+    title: "Plans before it codes",
+    line: "An architect explores read-only and hands you a plan to approve.",
+  },
+  {
+    glyph: "pencil",
+    title: "Writes it, then checks it",
+    line: "Every edit is a diff you approve. Then it runs your tests and fixes what it broke.",
+  },
+  {
+    glyph: "graph",
+    title: "Reviews the architecture",
+    line: "What will hurt as the project grows, on a dependency map, with one-click patches.",
+  },
+  {
+    glyph: "trend",
+    title: "Checks that it scales",
+    line: "Name the load you want to serve; it ranks what caps you today.",
+  },
+];
+
+export function capabilityList(): HTMLElement {
+  const list = el("div", undefined, "capabilities");
+  for (const item of CAPABILITIES) {
+    const row = el("div", undefined, "capability");
+    const mark = el("span", undefined, "mark");
+    mark.append(icon(item.glyph, 15));
+    const body = el("div", undefined, "body");
+    body.append(el("span", item.title, "name"), el("span", item.line, "line"));
+    row.append(mark, body);
+    list.append(row);
+  }
+  return list;
+}
+
+/**
+ * The part people do not believe until it is said plainly.
+ *
+ * There is no API-key field in the extension and no billing to set up, and the
+ * account picker stays live during a run — both are unusual enough that leaving
+ * them to be discovered means most people never discover them.
+ */
+export function pricingNote(): HTMLElement {
+  const note = el("div", undefined, "value-note");
+  const head = el("div", undefined, "head");
+  head.append(icon("key", 14), el("span", "No API keys. Ever."));
+  note.append(head);
+  note.append(
+    el(
+      "p",
+      "It runs on an AI account you already pay for — or don't: Gemini's free tier counts. Connect more than one and you can switch account or model in the middle of a build, and the next step takes it.",
+    ),
+  );
+  return note;
+}
+
 /** The line that answers "where does my key go", wherever the matrix appears. */
 export function keychainFootnote(): HTMLElement {
   return el(

@@ -13,7 +13,7 @@ import {
   type ProviderId,
 } from "../src/llm/types";
 import type { AllowedCommand, HostMessage, SidebarState, WebviewMessage } from "../src/protocol";
-import { connectMatrix, hero, keychainFootnote } from "./brand";
+import { capabilityList, connectMatrix, hero, keychainFootnote, pricingNote } from "./brand";
 import { icon, PROVIDER_ICONS, type IconName } from "./icons";
 
 declare function acquireVsCodeApi(): { postMessage(message: WebviewMessage): void };
@@ -155,6 +155,10 @@ function signedOut(state: SidebarState): HTMLElement[] {
         "It maps your codebase first — the dependency graph, where the risk sits — then plans a change against that map and writes the code. Runs on an AI account you already have.",
     }),
   );
+
+  out.push(sectionLabel("What it does"));
+  out.push(capabilityList());
+  out.push(pricingNote());
 
   out.push(sectionLabel("Connect an account"));
   out.push(...connectMatrix(sessionCapable, (id, method) =>
