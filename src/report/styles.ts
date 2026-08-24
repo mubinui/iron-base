@@ -1498,6 +1498,15 @@ ${TOKENS}
 ${BUTTONS}
 ${SIGN_IN}
 
+/* The shared button and sign-in blocks are written at the sidebar's scale.
+   The conversation is read, not scanned, so it runs a step larger — and a
+   12px button label under 15px prose reads as a mistake. */
+button { font-size: 13px; }
+.connect .name { font-size: 13.5px; }
+.connect .detail { font-size: 12px; }
+button.chip { font-size: 12px; }
+.footnote { font-size: 12px; }
+
 :root {
   --chat-radius: 10px;
   --head-h: 1px;
@@ -1506,7 +1515,7 @@ ${SIGN_IN}
 body {
   margin: 0;
   font-family: var(--vscode-font-family);
-  font-size: 13.5px;
+  font-size: 15px;
   line-height: 1.62;
   letter-spacing: -0.003em;
   color: var(--ink);
@@ -1540,7 +1549,7 @@ body {
   flex: 1 1 auto;
   min-width: 0;
   font-weight: 600;
-  font-size: 12.5px;
+  font-size: 14px;
   letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1587,7 +1596,7 @@ body {
   flex: 0 0 auto;
   padding: 0.18rem 0.55rem 0.18rem 0.42rem;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1612,7 +1621,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -1628,7 +1637,7 @@ button.meter {
   padding: 0.1rem 0.3rem;
   margin: -0.1rem -0.3rem;
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 12px;
 }
 button.meter:hover { background: var(--surface-raised); color: var(--ink); }
 button.meter.changed { color: var(--sev-medium); }
@@ -1651,13 +1660,13 @@ button.meter.changed { color: var(--sev-medium); }
 }
 .todos h3 {
   margin: 0 0 var(--space-2);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ink-muted);
 }
-.todo { display: flex; align-items: baseline; gap: var(--space-2); font-size: 12px; padding: 2px 0; }
+.todo { display: flex; align-items: baseline; gap: var(--space-2); font-size: 13px; padding: 2px 0; }
 .todo .box { flex: 0 0 auto; width: 13px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .todo .label { min-width: 0; overflow-wrap: anywhere; }
 .todo.done { color: var(--ink-muted); }
@@ -1697,7 +1706,7 @@ button.meter.changed { color: var(--sev-medium); }
 }
 .assistant pre {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   background: var(--surface-sunken);
   border: 1px solid var(--hairline);
@@ -1752,7 +1761,7 @@ button.meter.changed { color: var(--sev-medium); }
   margin-inline: -6px;
   padding: 3px 6px;
   border-radius: var(--radius-sm);
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--ink-muted);
 }
 .trace-row:hover { background: var(--surface); color: var(--ink); }
@@ -1788,7 +1797,7 @@ button.meter.changed { color: var(--sev-medium); }
 }
 
 .trace-row .verb {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -1800,7 +1809,7 @@ button.meter.changed { color: var(--sev-medium); }
 .trace-row .arg {
   min-width: 0;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink);
   opacity: 0.82;
   overflow: hidden;
@@ -1810,7 +1819,7 @@ button.meter.changed { color: var(--sev-medium); }
 /* A path is read from its end, so it is the start that gives way. */
 .trace-row .arg.path { direction: rtl; text-align: left; }
 .trace-row .note {
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   opacity: 0.6;
   white-space: nowrap;
@@ -1869,7 +1878,7 @@ button.meter.changed { color: var(--sev-medium); }
   margin-inline: -6px;
   padding: 3px 6px;
   border-radius: var(--radius-sm);
-  font-size: 10.5px;
+  font-size: 11.5px;
   color: var(--ink-muted);
   border: none;
   text-align: left;
@@ -1903,7 +1912,7 @@ button.meter.changed { color: var(--sev-medium); }
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
-  font-size: 12px;
+  font-size: 13px;
   background: var(--surface-raised);
   border-bottom: 1px solid var(--hairline);
   flex-wrap: wrap;
@@ -1913,7 +1922,7 @@ button.meter.changed { color: var(--sev-medium); }
   flex: 1 1 8rem;
   text-align: left;
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: 12.5px;
   font-weight: 600;
   border: none;
   padding: 0;
@@ -1926,7 +1935,7 @@ button.meter.changed { color: var(--sev-medium); }
 .card-head .spacer { flex: 1 1 auto; }
 .card-head .verb {
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1938,21 +1947,21 @@ button.meter.changed { color: var(--sev-medium); }
 .card-head .glyph.create { color: var(--good); opacity: 1; }
 .card-head .glyph.delete { color: var(--sev-critical); opacity: 1; }
 .card-head .glyph.edit { color: var(--accent); opacity: 1; }
-.counts { flex: 0 0 auto; font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.counts { flex: 0 0 auto; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
 .counts .add { color: var(--good); }
 .counts .del { color: var(--sev-critical); }
 .card .why {
   padding: var(--space-2) var(--space-3);
   color: var(--ink-muted);
-  font-size: 11.5px;
+  font-size: 12.5px;
   border-bottom: 1px solid var(--hairline);
   overflow-wrap: anywhere;
 }
 .card.reverted { opacity: 0.55; }
-.card.reverted .card-head::after { content: "reverted"; font-size: 10px; color: var(--ink-muted); }
+.card.reverted .card-head::after { content: "reverted"; font-size: 11px; color: var(--ink-muted); }
 
 /* ---- Diff ---- */
-.diff { font-family: var(--mono); font-size: 11.5px; line-height: 1.5; overflow: auto; max-height: 22rem; }
+.diff { font-family: var(--mono); font-size: 12.5px; line-height: 1.5; overflow: auto; max-height: 22rem; }
 .diff-row { display: flex; white-space: pre; min-width: min-content; }
 .diff-row .no {
   position: sticky;
@@ -1973,10 +1982,10 @@ button.meter.changed { color: var(--sev-medium); }
 .diff-row.remove .txt::before { content: "-"; color: var(--sev-critical); }
 .diff-row.context { background: var(--surface); }
 .diff-row.context .txt::before { content: " "; }
-.diff-gap { padding: 2px var(--space-3) 2px 3rem; color: var(--ink-muted); opacity: 0.5; font-size: 10.5px; }
+.diff-gap { padding: 2px var(--space-3) 2px 3rem; color: var(--ink-muted); opacity: 0.5; font-size: 11.5px; }
 
 /* ---- Command ---- */
-.cmd { font-family: var(--mono); font-size: 11.5px; }
+.cmd { font-family: var(--mono); font-size: 12.5px; }
 .cmd .line {
   padding: var(--space-2) var(--space-3);
   font-weight: 600;
@@ -1993,7 +2002,7 @@ button.meter.changed { color: var(--sev-medium); }
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 /* A command that has printed nothing yet should not reserve a band of empty
@@ -2012,7 +2021,7 @@ button.meter.changed { color: var(--sev-medium); }
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
   font-family: var(--vscode-font-family);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.03em;
   border: 1px solid var(--hairline-strong);
@@ -2075,17 +2084,17 @@ button.meter.changed { color: var(--sev-medium); }
 
 /* ---- Plan ---- */
 .plan { border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
-.plan h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+.plan h2 { margin: 0; font-size: 15.5px; font-weight: 600; letter-spacing: -0.01em; }
 .plan .body { padding: var(--space-4); }
 .plan .summary { color: var(--ink-muted); margin: var(--space-2) 0 var(--space-4); }
 .plan ol { margin: 0; padding-left: 1.25em; }
 .plan ol li { margin-bottom: var(--space-3); }
 .plan .step-title { font-weight: 600; }
-.plan .files { font-family: var(--mono); font-size: 11px; color: var(--accent); overflow-wrap: anywhere; }
-.plan .detail { color: var(--ink-muted); font-size: 12px; }
+.plan .files { font-family: var(--mono); font-size: 12px; color: var(--accent); overflow-wrap: anywhere; }
+.plan .detail { color: var(--ink-muted); font-size: 13px; }
 .plan h4 {
   margin: var(--space-4) 0 var(--space-1);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2108,7 +2117,7 @@ button.meter.changed { color: var(--sev-medium); }
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: 13px;
   margin: var(--space-2) 0;
   border: 1px solid;
   overflow-wrap: anywhere;
@@ -2169,7 +2178,7 @@ button.meter.changed { color: var(--sev-medium); }
   max-width: 100%;
   padding: 3px 4px 3px 8px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--ink);
   border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
   background: var(--accent-soft);
@@ -2201,7 +2210,7 @@ button.meter.changed { color: var(--sev-medium); }
   max-height: 14rem;
   resize: none;
   font-family: inherit;
-  font-size: 13.5px;
+  font-size: 15px;
   line-height: 1.55;
   color: var(--ink);
   background: transparent;
@@ -2248,7 +2257,7 @@ button.meter.changed { color: var(--sev-medium); }
   flex: 0 0 auto;
   padding: 0.3rem 0.6rem;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--ink-muted);
   border: 1px solid transparent;
   white-space: nowrap;
@@ -2278,7 +2287,7 @@ button.meter.changed { color: var(--sev-medium); }
   padding: 0.3rem 0.55rem;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: var(--ink-muted);
   background: none;
 }
@@ -2335,7 +2344,7 @@ button.meter.changed { color: var(--sev-medium); }
 }
 .popover-group {
   padding: var(--space-2) var(--space-2) var(--space-1);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2357,24 +2366,24 @@ button.meter.changed { color: var(--sev-medium); }
 .popover-row svg { flex: 0 0 auto; }
 .popover-row .body { display: grid; min-width: 0; }
 .popover-row .name {
-  font-size: 12px;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .popover-row .detail {
-  font-size: 10.5px;
+  font-size: 11.5px;
   color: var(--ink-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .popover-row .tick { margin-left: auto; color: var(--accent); }
-.popover-empty { padding: var(--space-3); font-size: 12px; color: var(--ink-muted); }
+.popover-empty { padding: var(--space-3); font-size: 13px; color: var(--ink-muted); }
 
-.toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 11.5px; color: var(--ink-muted); cursor: pointer; white-space: nowrap; }
+.toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 12.5px; color: var(--ink-muted); cursor: pointer; white-space: nowrap; }
 .toggle input { accent-color: var(--accent); }
-.hint { font-size: 11.5px; color: var(--ink-muted); margin: 0; }
+.hint { font-size: 12.5px; color: var(--ink-muted); margin: 0; }
 
 /* ---- Start page ---- */
 /*
@@ -2394,7 +2403,7 @@ button.meter.changed { color: var(--sev-medium); }
   border-radius: var(--radius-md);
   padding: var(--space-3);
   color: var(--ink-muted);
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
   line-height: 1.45;
   background: var(--surface);
