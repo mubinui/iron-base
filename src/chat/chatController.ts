@@ -42,7 +42,7 @@ import { scanWorkspace } from "../scanner/workspaceScanner";
 import { createNonce } from "../report/reportPanel";
 import { ALL_PROVIDERS, PROVIDER_LABELS, supportsMethod, type ProviderId } from "../llm/types";
 import { canCaptureSession } from "../llm/webSessions";
-import { log } from "../util/log";
+import { describeError, log } from "../util/log";
 import * as path from "node:path";
 import { relativeTo, resolveInside } from "../util/paths";
 import {
@@ -889,27 +889,50 @@ export class ChatController {
    * something that silently fails on the first read.
    */
   private async pickFiles(): Promise<void> {
-    const picked = await vscode.window.showOpenDialog({
-      canSelectMany: true,
-      openLabel: "Attach",
-      defaultUri: this.folder.uri,
-      title: "Attach files for IronBase to read",
-    });
+    let picked: vscode.Uri[] | undefined;
+    try {
+      picked = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: true,
+        openLabel: "Attach",
+        defaultUri: this.folder.uri,
+        title: "Attach files for IronBase to read",
+      });
+    } catch (err) {
+      // A dialog that cannot open is the one failure mode with no symptom on
+      // screen at all — the clip looks broken and nothing says why.
+      log.error("Could not open the attach dialog", err);
+      void vscode.window.showErrorMessage(`Could not open the file picker: ${describeError(err)}`);
+      return;
+    }
+    log.info(`Attach: picked ${picked?.length ?? 0} file(s).`);
     if (!picked || picked.length === 0) return;
 
     const inside: string[] = [];
-    let outside = 0;
+    const outside: string[] = [];
     for (const uri of picked) {
       const rel = relativeTo(this.folder.uri, uri);
-      if (rel.startsWith("..") || path.isAbsolute(rel)) outside += 1;
+      if (rel.startsWith("..") || path.isAbsolute(rel)) outside.push(uri.fsPath);
       else inside.push(rel);
     }
-    if (outside > 0) {
+
+    if (inside.length > 0) {
+      this.post({ type: "filesPicked", files: inside });
+      log.info(`Attach: ${inside.join(", ")}`);
+    }
+
+    // Every read tool is fenced to the workspace, so a file from elsewhere is a
+    // path the agent is structurally unable to open. Saying which ones were
+    // dropped beats a clip that appears to do nothing.
+    if (outside.length > 0) {
+      const names = outside.map((file) => path.basename(file)).join(", ");
       void vscode.window.showWarningMessage(
-        `${outside} file${outside === 1 ? "" : "s"} left out — IronBase can only read inside ${this.folder.name}.`,
+        inside.length === 0
+          ? `Nothing attached. IronBase can only read files inside ${this.folder.name}, and ${names} ${outside.length === 1 ? "is" : "are"} outside it.`
+          : `${names} left out — IronBase can only read inside ${this.folder.name}.`,
       );
     }
-    if (inside.length > 0) this.post({ type: "filesPicked", files: inside });
   }
 
   // --- File actions ----------------------------------------------------------
