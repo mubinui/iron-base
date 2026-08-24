@@ -1253,28 +1253,37 @@ p { margin: 0 0 10px; }
   transform: translateX(2px);
 }
 
-/* The one action the screen exists for, and it should look like it. */
+/*
+ * The one action the screen exists for.
+ *
+ * It reads as the same card as the two below it, one step up — not as a
+ * different species. A saturated slab beside two neutral cards made the set
+ * look like two unrelated things rather than a ranked three, so the weight is
+ * carried by a tint, a stronger hairline and one solid mark, and the type and
+ * the surface stay exactly where the others are.
+ */
 .tile.primary {
-  border-color: transparent;
-  color: var(--brand-contrast);
-  background: linear-gradient(135deg, var(--brand-0), var(--brand-1) 48%, var(--brand-2));
-  box-shadow: 0 14px 30px -14px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-  padding: 15px 14px 16px;
+  border-color: color-mix(in srgb, var(--brand-accent) 46%, transparent);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--brand-1) 13%, var(--surface)),
+    color-mix(in srgb, var(--brand-2) 7%, var(--surface))
+  );
+  box-shadow: 0 6px 18px -14px var(--brand-1);
 }
 .tile.primary:hover {
-  border-color: transparent;
-  filter: brightness(1.07);
-  box-shadow: 0 18px 34px -14px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  border-color: color-mix(in srgb, var(--brand-accent) 72%, transparent);
+  box-shadow: 0 11px 24px -14px var(--brand-1);
 }
+/* The one place the brand is at full strength, and it is 34px across. */
 .tile.primary .mark {
   color: var(--brand-contrast);
-  border-color: rgba(255, 255, 255, 0.32);
-  background: rgba(255, 255, 255, 0.18);
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--brand-1), var(--brand-2));
+  box-shadow: 0 4px 11px -5px var(--brand-1), inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
-.tile.primary .name { font-size: 13.5px; }
-.tile.primary .line { color: rgba(255, 255, 255, 0.86); }
-.tile.primary .go { color: var(--brand-contrast); background: rgba(255, 255, 255, 0.2); }
-.tile.primary:hover .go { background: rgba(255, 255, 255, 0.3); color: var(--brand-contrast); }
+.tile.primary .go { color: var(--brand-contrast); background: var(--brand-accent); }
+.tile.primary:hover .go { background: var(--brand-1); }
 
 /* The tail: real actions, but none of them the reason you opened the panel. */
 .link-group {
