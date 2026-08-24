@@ -8,6 +8,8 @@
  * against a stub that quietly returns undefined.
  */
 
+import { posix } from "node:path";
+
 export class EventEmitter<T> {
   private listeners: ((e: T) => void)[] = [];
 
@@ -50,4 +52,26 @@ export const workspace = {
 export const window = {};
 export const commands = {};
 export const env = {};
-export const Uri = {};
+
+/**
+ * Just enough `Uri` for the workspace path guard.
+ *
+ * `resolveInside` only reads `.path` and calls `joinPath`, so that is all this
+ * implements. Joining normalises with posix semantics the way the real one
+ * does, which matters: the guard's final containment check assumes the join
+ * has already collapsed the segments it was handed.
+ */
+export const Uri = {
+  file(value: string): { scheme: string; path: string; fsPath: string } {
+    const absolute = value.startsWith("/") ? value : `/${value}`;
+    const normalized = posix.normalize(absolute);
+    return { scheme: "file", path: normalized, fsPath: normalized };
+  },
+
+  joinPath(
+    base: { path: string },
+    ...segments: string[]
+  ): { scheme: string; path: string; fsPath: string } {
+    return Uri.file(posix.join(base.path, ...segments));
+  },
+};

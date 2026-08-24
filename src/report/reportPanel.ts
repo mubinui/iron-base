@@ -1,7 +1,9 @@
+import * as crypto from "node:crypto";
 import * as vscode from "vscode";
 import type { AnalysisReport, CodeFix } from "../engine/findings";
 import { isAllowedCommand, type HostMessage, type WebviewMessage } from "../protocol";
 import { log } from "../util/log";
+import { resolveInside } from "../util/paths";
 import { applyFix, previewFix } from "./fixApplier";
 import { REPORT_STYLES } from "./styles";
 
@@ -129,7 +131,18 @@ export class ReportPanel {
   }
 
   private async openFile(file: string, line?: number): Promise<void> {
-    const uri = vscode.Uri.joinPath(this.root, ...file.split("/"));
+    // An evidence link carries a path the model wrote, so it goes through the
+    // same guard as every read and write rather than being trusted because it
+    // arrived in a report. Joining it straight onto the root meant a finding
+    // citing `../../../../etc/passwd` opened that file on click.
+    const uri = resolveInside(this.root, file);
+    if (!uri) {
+      log.warn(`Refused to open ${file}: outside the workspace.`);
+      void vscode.window.showWarningMessage(
+        `IronBase refused to open ${file} because it is outside this workspace.`,
+      );
+      return;
+    }
     try {
       const document = await vscode.workspace.openTextDocument(uri);
       const editor = await vscode.window.showTextDocument(document, {
@@ -185,12 +198,14 @@ export class ReportPanel {
   }
 }
 
+/**
+ * The nonce is what stops injected markup executing in the webview, so it has
+ * to be unguessable. `Math.random()` is seeded predictably and is not a
+ * cryptographic source; `node:crypto` is already available in the extension
+ * host. base64url keeps the value safe to drop straight into both the CSP
+ * header and a `nonce="…"` attribute without escaping.
+ */
 export function createNonce(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let out = "";
-  for (let i = 0; i < 32; i++) {
-    out += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return out;
+  return crypto.randomBytes(16).toString("base64url");
 }
 
