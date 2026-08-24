@@ -270,11 +270,20 @@ export type ChatHostMessage =
   /** Takes the card off screen — answered, cancelled, or the run ended. */
   | { type: "permissionClosed"; id: string; decision: PermissionDecision }
   | { type: "changeReverted"; id: string }
+  /** Workspace-relative paths the developer picked to attach. */
+  | { type: "filesPicked"; files: string[] }
   | { type: "modelOptions"; options: ModelOption[] };
 
 export type ChatWebviewMessage =
   | { type: "ready" }
-  | { type: "send"; text: string; mode: ChatMode }
+  /**
+   * `attachments` are workspace-relative paths the developer pointed at.
+   *
+   * They are named in the request rather than read and pasted in: the agent
+   * already has `read_file`, and it should decide how much of a file it needs
+   * rather than being handed all of every one of them.
+   */
+  | { type: "send"; text: string; mode: ChatMode; attachments?: string[] }
   | { type: "stop" }
   | { type: "approvePlan" }
   | { type: "editPlan" }
@@ -282,6 +291,8 @@ export type ChatWebviewMessage =
   | { type: "permissionDecision"; id: string; decision: PermissionDecision }
   | { type: "setAutoAccept"; on: boolean }
   | { type: "requestModels" }
+  /** Opens the file picker; the chosen paths come back as `filesPicked`. */
+  | { type: "pickFiles" }
   | { type: "selectModel"; provider: ProviderId | "auto"; model: string }
   | { type: "openFile"; file: string; line?: number }
   | { type: "showDiff"; id: string }

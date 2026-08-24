@@ -26,6 +26,17 @@ import { icon, PROVIDER_ICONS, type IconName } from "./icons";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /**
+ * The mark's own bounds inside the 24-unit grid, and the share of the tile it
+ * covers — the same FILL scripts/generate-icon.py uses for the Marketplace
+ * tile. Keeping the two in step is what makes the panel and the store show one
+ * product rather than two similar ones.
+ */
+const MARK_SPAN = 17; // x 3.5 → 20.5
+const MARK_CX = 12;
+const MARK_CY = 12.3; // y 4 → 20.6
+const MARK_FILL = 0.78;
+
+/**
  * Providers led with in the connect matrix.
  *
  * The recognisable accounts, so the first screen is names people know rather
@@ -50,10 +61,18 @@ export const FEATURED: ProviderId[] = [
  * from CSS, and the tiers are flat white — no gradient inside the glyph itself,
  * which keeps it crisp at any size.
  */
-export function brandMark(size = 51): HTMLElement {
+export function brandMark(size = 46): HTMLElement {
   const tile = el("div", undefined, "brand-tile");
   const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
+  // A viewBox cropped to the glyph's own bounds plus the margin the Marketplace
+  // tile leaves around it, so the svg is exactly the tile's size and the mark
+  // lands at the same 0.78 of it. Drawing the full 0-24 box and then scaling
+  // the svg past the tile is what put the mark off-centre and clipped it
+  // against the corners.
+  const box = MARK_SPAN / MARK_FILL;
+  const x = MARK_CX - box / 2;
+  const y = MARK_CY - box / 2;
+  svg.setAttribute("viewBox", `${x.toFixed(3)} ${y.toFixed(3)} ${box.toFixed(3)} ${box.toFixed(3)}`);
   svg.setAttribute("width", String(size));
   svg.setAttribute("height", String(size));
   svg.setAttribute("aria-hidden", "true");

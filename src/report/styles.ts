@@ -920,7 +920,11 @@ const SIGN_IN = `
 .brand-tile {
   width: 46px;
   height: 46px;
-  border-radius: 14px;
+  /* The ratio scripts/generate-icon.py rounds the Marketplace tile by, written
+     as a percentage so every size matches it. A fixed radius made the smaller
+     tiles proportionally rounder than the icon, and the widest tier ran out of
+     air against the corner — which is what read as a broken mark. */
+  border-radius: 22.35%;
   margin: 0 auto 14px;
   display: grid;
   place-items: center;
@@ -1168,12 +1172,7 @@ p { margin: 0 0 10px; }
 .masthead .brand-tile,
 .masthead .wordmark,
 .masthead .tagline { position: relative; }
-.masthead .brand-tile {
-  width: 46px;
-  height: 46px;
-  border-radius: 14px;
-  margin: 0;
-}
+.masthead .brand-tile { width: 46px; height: 46px; margin: 0; }
 .masthead .wordmark { margin: 0; font-size: 15px; letter-spacing: 0.26em; }
 .masthead .tagline {
   margin: 0;
@@ -2146,6 +2145,45 @@ button.meter.changed { color: var(--sev-medium); }
   box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-sm);
 }
 .composer-box.signed-out { padding: var(--space-4); display: grid; gap: var(--space-3); justify-items: start; }
+
+/* Attached files, inside the composer surface and above what you type. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0.7rem 0.85rem 0;
+}
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 4px 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
+  background: var(--accent-soft);
+}
+.attachment .glyph { flex: 0 0 auto; opacity: 0.75; }
+.attachment .name {
+  min-width: 0;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment .drop {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  color: var(--ink-muted);
+}
+.attachment .drop:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); color: var(--ink); }
 
 .composer textarea {
   display: block;

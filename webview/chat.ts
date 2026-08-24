@@ -90,6 +90,15 @@ let openTrace: HTMLElement | undefined;
 /** True while the start page owns the screen, which the composer defers to. */
 let onStartPage = true;
 
+/**
+ * Workspace-relative paths the developer pointed the agent at.
+ *
+ * They are named in the request rather than read into it — the agent has
+ * `read_file` and should decide how much of each it needs. Cleared on send,
+ * because an attachment is part of one request, not a standing preference.
+ */
+let attachments: string[] = [];
+
 // --- Shell -----------------------------------------------------------------
 
 const head = el("div", undefined, "chat-head");
@@ -236,6 +245,16 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
     case "modelOptions":
       fillModelMenu(message.options);
       break;
+
+    case "filesPicked": {
+      // The picker can be reopened to add more, so this merges rather than
+      // replaces, and drops anything already on the list.
+      for (const file of message.files) {
+        if (!attachments.includes(file)) attachments.push(file);
+      }
+      renderComposer();
+      break;
+    }
   }
 });
 
@@ -761,6 +780,7 @@ function renderComposer(): void {
 
   const spec = MODES[mode];
   const box = el("div", undefined, `composer-box mode-${mode}`);
+  if (attachments.length > 0 && spec.brief === "task") box.append(attachmentRail());
   input.value = draft;
   // A whole-project review takes no brief, so the box says what will happen
   // and stops taking typing rather than accepting a sentence it would drop.
@@ -774,6 +794,16 @@ function renderComposer(): void {
   bar.append(
     iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
   );
+
+  // Only where what you type is a request. A whole-project review takes no
+  // brief, so there is nothing for an attachment to attach to.
+  if (spec.brief === "task") {
+    bar.append(
+      iconButton("Attach files", "paperclip", () =>
+        vscode.postMessage({ type: "pickFiles" }),
+      ),
+    );
+  }
 
   const modeButton = el("button", undefined, "bar-chip mode-pick");
   modeButton.append(icon(spec.glyph, 13), el("span", spec.label), icon("chevron", 10, "caret"));
@@ -847,6 +877,32 @@ function renderComposer(): void {
   if (!input.disabled && document.activeElement === document.body) input.focus();
 }
 
+/** The attached files, each removable, above the box you type in. */
+function attachmentRail(): HTMLElement {
+  const rail = el("div", undefined, "attachments");
+  for (const file of attachments) {
+    const chip = el("span", undefined, "attachment");
+    chip.title = file;
+    chip.append(icon("file", 11, "glyph"), el("span", basename(file), "name"));
+    const remove = el("button", undefined, "drop");
+    remove.title = `Remove ${file}`;
+    remove.setAttribute("aria-label", `Remove ${file}`);
+    remove.append(icon("close", 10));
+    remove.addEventListener("click", () => {
+      attachments = attachments.filter((entry) => entry !== file);
+      renderComposer();
+    });
+    chip.append(remove);
+    rail.append(chip);
+  }
+  return rail;
+}
+
+function basename(file: string): string {
+  const cut = file.lastIndexOf("/");
+  return cut === -1 ? file : file.slice(cut + 1);
+}
+
 /** What the composer draws, so a redraw can be skipped when none of it moved. */
 function composerSignature(): string {
   return [
@@ -856,6 +912,7 @@ function composerSignature(): string {
     state.autoAcceptEdits,
     mode,
     onStartPage,
+    attachments.join(","),
   ].join("|");
 }
 
@@ -1060,10 +1117,19 @@ function send(): void {
     return;
   }
 
-  if (text.length === 0) return;
-  vscode.postMessage({ type: "send", text, mode: current });
+  // Attached files are a request on their own — "look at these" is a thing
+  // someone means to say — so an empty box with attachments still sends.
+  if (text.length === 0 && attachments.length === 0) return;
+  vscode.postMessage({
+    type: "send",
+    text,
+    mode: current,
+    attachments: attachments.length > 0 ? [...attachments] : undefined,
+  });
   input.value = "";
   draft = "";
+  attachments = [];
+  renderComposer();
 }
 
 /**

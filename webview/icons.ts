@@ -54,6 +54,7 @@ export type IconName =
   | "chevron"
   | "back"
   | "gear"
+  | "paperclip"
   | "file"
   | "folder"
   | "layers"
@@ -445,6 +446,13 @@ const GLYPHS: Record<IconName, Glyph> = {
   chevron: {
     box: 24,
     strokes: ["M9 5 L16 12 L9 19"],
+  },
+  /** Attach a file for the agent to start from. */
+  paperclip: {
+    box: 24,
+    strokes: [
+      "M20.1 11.4 L11.6 19.9 A4.8 4.8 0 0 1 4.8 13.1 L13.9 4 A3.2 3.2 0 0 1 18.4 8.5 L9.4 17.6 A1.6 1.6 0 0 1 7.1 15.3 L15 7.5",
+    ],
   },
   /**
    * Accounts, reviews and everything that is not the conversation.

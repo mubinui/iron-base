@@ -43,7 +43,8 @@ import { createNonce } from "../report/reportPanel";
 import { ALL_PROVIDERS, PROVIDER_LABELS, supportsMethod, type ProviderId } from "../llm/types";
 import { canCaptureSession } from "../llm/webSessions";
 import { log } from "../util/log";
-import { resolveInside } from "../util/paths";
+import * as path from "node:path";
+import { relativeTo, resolveInside } from "../util/paths";
 import {
   type ChatHostMessage,
   type ChatState,
@@ -53,6 +54,22 @@ import {
   type ThreadItem,
   isAllowedCommand,
 } from "../protocol";
+
+/**
+ * Names the attached files at the top of the request.
+ *
+ * Plain prose rather than a fenced block or a pasted dump: the model reads the
+ * request as a sentence, and it has `read_file` to open what it is pointed at.
+ */
+function withAttachments(text: string, attachments?: string[]): string {
+  if (!attachments || attachments.length === 0) return text;
+  const list = attachments.map((file) => `\`${file}\``).join(", ");
+  const lead =
+    attachments.length === 1
+      ? `Start from ${list}.`
+      : `Start from these files: ${list}.`;
+  return text.trim().length > 0 ? `${lead}\n\n${text}` : lead;
+}
 
 function isProvider(value: unknown): value is ProviderId {
   return typeof value === "string" && (ALL_PROVIDERS as readonly string[]).includes(value);
@@ -714,8 +731,12 @@ export class ChatController {
         void (async () => {
           const session = await this.ensureSession();
           this.streaming = false;
-          await session?.send(message.text, message.mode);
+          await session?.send(withAttachments(message.text, message.attachments), message.mode);
         })();
+        break;
+
+      case "pickFiles":
+        void this.pickFiles();
         break;
 
       case "stop":
@@ -857,6 +878,38 @@ export class ChatController {
     if (!doc || doc.isClosed) return undefined;
     const text = doc.getText().trim();
     return text.length > 0 ? text : undefined;
+  }
+
+  /**
+   * Asks for files to point the agent at.
+   *
+   * Anything outside the workspace is dropped rather than copied in: every read
+   * tool is fenced to the folder, so an attachment from elsewhere would be a
+   * path the agent is structurally unable to open. Saying so beats attaching
+   * something that silently fails on the first read.
+   */
+  private async pickFiles(): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: true,
+      openLabel: "Attach",
+      defaultUri: this.folder.uri,
+      title: "Attach files for IronBase to read",
+    });
+    if (!picked || picked.length === 0) return;
+
+    const inside: string[] = [];
+    let outside = 0;
+    for (const uri of picked) {
+      const rel = relativeTo(this.folder.uri, uri);
+      if (rel.startsWith("..") || path.isAbsolute(rel)) outside += 1;
+      else inside.push(rel);
+    }
+    if (outside > 0) {
+      void vscode.window.showWarningMessage(
+        `${outside} file${outside === 1 ? "" : "s"} left out — IronBase can only read inside ${this.folder.name}.`,
+      );
+    }
+    if (inside.length > 0) this.post({ type: "filesPicked", files: inside });
   }
 
   // --- File actions ----------------------------------------------------------
