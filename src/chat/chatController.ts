@@ -411,6 +411,75 @@ export class ChatController {
     this.adopt(saved);
   }
 
+  /**
+   * The saved builds, for the panel's own history menu.
+   *
+   * A quick pick would open at the top of the window, a long way from the
+   * control that asked for it and a long way from the conversation it replaces.
+   * The panel draws its own, so the list appears under the button.
+   */
+  private async sendSessionList(): Promise<void> {
+    await this.persist();
+    const summaries = await this.deps.sessionStore.list(this.workspaceKey);
+    this.post({
+      type: "sessionList",
+      sessions: summaries.map((summary) => ({
+        id: summary.id,
+        title: summary.title,
+        when: relativeTime(summary.updatedAt),
+        messageCount: summary.messageCount,
+        changedFiles: summary.changedFiles,
+        current: summary.id === this.sessionId,
+      })),
+    });
+  }
+
+  private async openSession(id: string): Promise<void> {
+    if (id === this.sessionId) return;
+    if (this.session?.isRunning) {
+      void vscode.window.showInformationMessage("Stop the current build first.");
+      return;
+    }
+    await this.persist();
+    const saved = await this.deps.sessionStore.load(this.workspaceKey, id);
+    if (!saved) {
+      void vscode.window.showWarningMessage("That build could not be read.");
+      return;
+    }
+    this.adopt(saved);
+  }
+
+  /**
+   * Deletes a saved build, after asking.
+   *
+   * A build carries the undo history for every file it touched, so losing one
+   * by a mis-click on a row is not a small thing.
+   */
+  private async deleteSession(id: string): Promise<void> {
+    const summaries = await this.deps.sessionStore.list(this.workspaceKey);
+    const target = summaries.find((summary) => summary.id === id);
+    if (!target) return;
+
+    const confirm = await vscode.window.showWarningMessage(
+      `Delete "${target.title}"?`,
+      {
+        modal: true,
+        detail:
+          target.changedFiles > 0
+            ? `Its record of ${target.changedFiles} changed file(s) goes too, so those changes can no longer be reverted from here. The files themselves are left alone.`
+            : "The conversation and its transcript are removed. The files it touched are left alone.",
+      },
+      "Delete",
+    );
+    if (confirm !== "Delete") return;
+
+    await this.deps.sessionStore.delete(this.workspaceKey, id);
+    // Deleting the open one leaves the panel showing a build that no longer
+    // exists, so it starts a fresh one rather than pretending otherwise.
+    if (id === this.sessionId) await this.newSession();
+    await this.sendSessionList();
+  }
+
   async exportSession(): Promise<void> {
     if (this.thread.length === 0) {
       void vscode.window.showInformationMessage("There is nothing in this build to export yet.");
@@ -807,6 +876,18 @@ export class ChatController {
 
       case "switchSession":
         void this.switchSession();
+        break;
+
+      case "requestSessions":
+        void this.sendSessionList();
+        break;
+
+      case "openSession":
+        void this.openSession(message.id);
+        break;
+
+      case "deleteSession":
+        void this.deleteSession(message.id);
         break;
 
       case "exportSession":

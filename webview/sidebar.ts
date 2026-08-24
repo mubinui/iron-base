@@ -12,7 +12,13 @@ import {
   PROVIDER_LABELS,
   type ProviderId,
 } from "../src/llm/types";
-import type { AllowedCommand, HostMessage, SidebarState, WebviewMessage } from "../src/protocol";
+import type {
+  AllowedCommand,
+  HostMessage,
+  ModelOption,
+  SidebarState,
+  WebviewMessage,
+} from "../src/protocol";
 import { SIDEBAR_STYLES } from "../src/report/styles";
 import {
   brandMark,
@@ -72,6 +78,10 @@ let warning = "";
 let timerId: number | undefined;
 
 window.addEventListener("message", (event: MessageEvent<HostMessage>) => {
+  if (event.data.type === "modelOptions") {
+    fillModelPanel(event.data.options);
+    return;
+  }
   const message = event.data;
   if (message.type === "state") {
     if (!message.state.running) {
@@ -194,6 +204,85 @@ function signedOut(state: SidebarState): HTMLElement[] {
   return out;
 }
 
+/**
+ * Changing the model without leaving the panel.
+ *
+ * The command behind this opened a quick pick at the top of the window, a long
+ * way from the account row that prompted it. The list is drawn here instead,
+ * under the row, the same way the composer's own model menu works.
+ */
+function inlineModelPicker(): HTMLElement {
+  const wrap = el("div", undefined, "inline-menu");
+  const trigger = el("button", undefined, "link");
+  trigger.append(icon("switchAccount", 13), el("span", "Change model"), icon("chevron", 12, "caret"));
+  const panel = el("div", undefined, "inline-panel");
+  panel.hidden = true;
+
+  trigger.addEventListener("click", () => {
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    wrap.classList.toggle("open", opening);
+    if (!opening) return;
+    panel.replaceChildren(el("div", "Loading accounts…", "hint"));
+    vscode.postMessage({ type: "requestModels" });
+    modelPanel = panel;
+  });
+
+  wrap.append(trigger, panel);
+  return wrap;
+}
+
+let modelPanel: HTMLElement | undefined;
+
+function fillModelPanel(options: ModelOption[]): void {
+  const panel = modelPanel;
+  if (!panel) return;
+  panel.replaceChildren();
+  if (options.length === 0) {
+    panel.append(el("div", "No accounts are connected.", "hint"));
+    return;
+  }
+  let group = "";
+  for (const option of options) {
+    if (option.group !== group) {
+      group = option.group;
+      panel.append(el("div", group, "menu-group"));
+    }
+    const row = el("button", undefined, `menu-row${option.current ? " current" : ""}`);
+    row.append(icon(option.providerId ? (PROVIDER_ICONS[option.providerId] as IconName) : "layers", 14));
+    const body = el("span", undefined, "body");
+    body.append(el("span", option.label, "name"));
+    if (option.detail) body.append(el("span", option.detail, "detail"));
+    row.append(body);
+    if (option.current) row.append(icon("check", 13, "tick"));
+    row.addEventListener("click", () =>
+      vscode.postMessage({ type: "selectModel", provider: option.provider, model: option.model }),
+    );
+    panel.append(row);
+  }
+}
+
+/** The connect matrix, in place, instead of a picker at the top of the window. */
+function inlineConnect(sessionCapable: Set<ProviderId>): HTMLElement {
+  const wrap = el("div", undefined, "inline-menu");
+  const trigger = el("button", undefined, "link");
+  trigger.append(icon("signIn", 13), el("span", "Connect another account"), icon("chevron", 12, "caret"));
+  const panel = el("div", undefined, "inline-panel");
+  panel.hidden = true;
+  panel.append(
+    ...connectMatrix(sessionCapable, (id, method) =>
+      vscode.postMessage({ type: "connectProvider", id, method }),
+    ),
+  );
+  trigger.addEventListener("click", () => {
+    const opening = panel.hidden;
+    panel.hidden = !opening;
+    wrap.classList.toggle("open", opening);
+  });
+  wrap.append(trigger, panel);
+  return wrap;
+}
+
 function sectionRule(text: string): HTMLElement {
   const row = el("div", undefined, "section-rule");
   row.append(el("span", text, "label"), el("span", undefined, "rule"));
@@ -310,13 +399,13 @@ function connected(state: SidebarState): HTMLElement[] {
   out.push(el("p", describeAccount(state), "muted"));
 
   const links = el("div", undefined, "link-group");
-  links.append(linkButton("Change model", "switchAccount", "ironbase.chooseModel"));
+  links.append(inlineModelPicker());
 
   // Always the picker, never a guess: jumping straight into whichever provider
   // happened to be first in the list meant "connect another account" started a
   // ChatGPT sign-in for someone who wanted Gemini.
   if (ACCOUNTS.some((a) => !connectedIds.has(a.id) && a.id !== state.providerId)) {
-    links.append(linkButton("Connect another account", "signIn", CONNECT));
+    links.append(inlineConnect(new Set(state.sessionCapable ?? [])));
   }
   links.append(linkButton("Rebuild project index", "refresh", "ironbase.clearIndex"));
   // Disconnecting one account is the common case; wiping every credential is

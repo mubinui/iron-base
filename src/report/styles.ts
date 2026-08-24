@@ -1014,6 +1014,61 @@ const SIGN_IN = `
 .value-note .head svg { flex: 0 0 auto; color: var(--brand-accent); }
 .value-note p { margin: 6px 0 0; color: var(--ink-muted); font-size: 11.5px; line-height: 1.45; }
 
+/* ---- Inline menus ---- */
+/*
+ * A row that opens its own list underneath, rather than handing off to a quick
+ * pick at the top of the window. The chevron turns so the row says whether it
+ * is open, and the panel is inset so the list reads as belonging to it.
+ */
+.inline-menu { display: flex; flex-direction: column; }
+.inline-menu > .link { width: 100%; }
+.inline-menu > .link .caret { margin-left: auto; opacity: 0.55; transition: transform 140ms ease; }
+.inline-menu.open > .link .caret { transform: rotate(90deg); opacity: 1; }
+/* An author display rule beats the UA sheet's hidden-attribute rule, so the
+   panel has to say so itself or it stands open while claiming to be shut. */
+.inline-panel[hidden] { display: none; }
+.inline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 6px 8px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--surface-sunken);
+  max-height: 20rem;
+  overflow-y: auto;
+}
+.inline-panel .hint { padding: 6px 4px; }
+.menu-group {
+  padding: 6px 4px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 7px;
+  border-radius: 7px;
+  border: none;
+  text-align: left;
+  min-width: 0;
+  color: inherit;
+}
+.menu-row:hover { background: var(--surface-raised); }
+.menu-row.current { color: var(--accent); }
+.menu-row svg { flex: 0 0 auto; }
+.menu-row .body { display: grid; min-width: 0; }
+.menu-row .name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-row .detail { font-size: 11px; color: var(--ink-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-row .tick { margin-left: auto; color: var(--accent); }
+.inline-panel .connect { border-radius: 10px; }
+
 /* ---- Connect matrix ---- */
 
 .connect-grid { display: flex; flex-direction: column; gap: 7px; }
@@ -1594,7 +1649,8 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.head-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+/* Also the anchor the past-builds menu hangs from. */
+.head-actions { position: relative; display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 
 /*
  * The way back to the accounts screen.
@@ -2210,22 +2266,29 @@ button.meter.changed { color: var(--sev-medium); }
   gap: 6px;
   padding: 0.7rem 0.85rem 0;
 }
+/*
+ * A card, not a tag. An attachment is something you added to the request and
+ * may want to take back, so it gets a surface, a mark and a target you can
+ * actually hit — the accent-filled pill it replaced read as a status badge and
+ * put its remove button at 16px.
+ */
 .attachment {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
   max-width: 100%;
-  padding: 3px 4px 3px 8px;
-  border-radius: 999px;
-  font-size: 12px;
+  padding: 4px 5px 4px 8px;
+  border-radius: 9px;
+  font-size: 12.5px;
   color: var(--ink);
-  border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent);
-  background: var(--accent-soft);
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-raised);
+  transition: border-color 140ms ease;
 }
-.attachment .glyph { flex: 0 0 auto; opacity: 0.75; }
+.attachment:hover { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.attachment .glyph { flex: 0 0 auto; color: var(--accent); }
 .attachment .name {
   min-width: 0;
-  font-family: var(--mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2234,13 +2297,18 @@ button.meter.changed { color: var(--sev-medium); }
   flex: 0 0 auto;
   display: grid;
   place-items: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
   border: none;
   color: var(--ink-muted);
+  opacity: 0.6;
 }
-.attachment .drop:hover { background: color-mix(in srgb, var(--accent) 26%, transparent); color: var(--ink); }
+.attachment:hover .drop { opacity: 1; }
+.attachment .drop:hover {
+  background: color-mix(in srgb, var(--sev-critical) 18%, transparent);
+  color: var(--sev-critical);
+}
 
 .composer textarea {
   display: block;
@@ -2419,6 +2487,94 @@ button.meter.changed { color: var(--sev-medium); }
 }
 .popover-row .tick { margin-left: auto; color: var(--accent); }
 .popover-empty { padding: var(--space-3); font-size: 13px; color: var(--ink-muted); }
+
+/* ---- Past builds ---- */
+/*
+ * Hangs off the header button rather than opening at the top of the window,
+ * which is a long way from the control that asked for it and sits over the
+ * conversation it is offering to replace.
+ */
+.session-menu {
+  top: calc(100% + 8px);
+  bottom: auto;
+  right: 0;
+  left: auto;
+  width: min(23rem, calc(100vw - 2rem));
+  max-width: none;
+  max-height: 24rem;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2);
+  gap: var(--space-2);
+}
+.session-search {
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline-strong);
+  background: var(--vscode-input-background, var(--surface));
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 13px;
+}
+.session-search:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.session-rows { overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0.3rem 0.35rem 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.session-row:hover { background: var(--surface-raised); }
+.session-row.current { background: var(--accent-soft); }
+.session-row .open {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  border: none;
+  padding: 0;
+  color: inherit;
+}
+.session-row.current .open { color: var(--accent); font-weight: 600; }
+.session-row .name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.session-row .when {
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* Destructive, so it stays out of the way until the row is under the pointer. */
+.session-row .drop {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  border: none;
+  color: var(--ink-muted);
+  opacity: 0;
+}
+.session-row:hover .drop { opacity: 1; }
+.session-row .drop:focus-visible { opacity: 1; }
+.session-row .drop:hover {
+  background: color-mix(in srgb, var(--sev-critical) 18%, transparent);
+  color: var(--sev-critical);
+}
 
 .toggle { display: inline-flex; align-items: center; gap: var(--space-2); font-size: 12.5px; color: var(--ink-muted); cursor: pointer; white-space: nowrap; }
 .toggle input { accent-color: var(--accent); }

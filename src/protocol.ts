@@ -13,7 +13,9 @@ export type HostMessage =
   | { type: "progressIteration"; current: number; max: number }
   | { type: "progressFinding"; finding: Finding }
   | { type: "warning"; text: string }
-  | { type: "fixResult"; fixId: string; ok: boolean; message: string };
+  | { type: "fixResult"; fixId: string; ok: boolean; message: string }
+  /** Fills the home screen's own model menu; see `requestModels`. */
+  | { type: "modelOptions"; options: ModelOption[] };
 
 /**
  * Commands a webview may ask the host to run.
@@ -70,7 +72,14 @@ export type WebviewMessage =
   // provider matrix on receipt — the same posture as `isAllowedCommand`,
   // because this channel also carries model-generated content elsewhere.
   | { type: "connectProvider"; id: ProviderId; method: AuthMethod }
-  | { type: "disconnectProvider"; id: ProviderId };
+  | { type: "disconnectProvider"; id: ProviderId }
+  /**
+   * Asks for the models the connected accounts offer, so the home screen can
+   * draw its own menu rather than sending someone to a quick pick at the top
+   * of the window.
+   */
+  | { type: "requestModels" }
+  | { type: "selectModel"; provider: ProviderId | "auto"; model: string };
 
 export interface SidebarState {
   /** Empty when nothing is signed in. */
@@ -221,6 +230,17 @@ export interface PermissionCard {
   removed?: number;
 }
 
+/** One saved build, as the panel's own history menu draws it. */
+export interface SessionRow {
+  id: string;
+  title: string;
+  /** Already humanised — "5m", "13d" — because only the host knows the clock. */
+  when: string;
+  messageCount: number;
+  changedFiles: number;
+  current: boolean;
+}
+
 export interface ChatState {
   workspaceName: string;
   /** Names the build in the header and in the session picker. */
@@ -273,7 +293,8 @@ export type ChatHostMessage =
   | { type: "changeReverted"; id: string }
   /** Workspace-relative paths the developer picked to attach. */
   | { type: "filesPicked"; files: string[] }
-  | { type: "modelOptions"; options: ModelOption[] };
+  | { type: "modelOptions"; options: ModelOption[] }
+  | { type: "sessionList"; sessions: SessionRow[] };
 
 export type ChatWebviewMessage =
   | { type: "ready" }
@@ -301,6 +322,10 @@ export type ChatWebviewMessage =
   | { type: "revertAll" }
   | { type: "newSession" }
   | { type: "switchSession" }
+  /** Fills the panel's own history menu; answered with `sessionList`. */
+  | { type: "requestSessions" }
+  | { type: "openSession"; id: string }
+  | { type: "deleteSession"; id: string }
   | { type: "exportSession" }
   /**
    * Starts one of the whole-workspace runs from the composer.

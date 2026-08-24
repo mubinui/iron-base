@@ -16,6 +16,7 @@ import * as vscode from "vscode";
 import type { ChatController, ChatSurface } from "../chat/chatController";
 import { html as chatHtml } from "../chat/chatPanel";
 import { ALL_PROVIDERS, supportsMethod, type ProviderId } from "../llm/types";
+import type { ModelOption } from "../protocol";
 import {
   isAllowedCommand,
   type ChatHostMessage,
@@ -65,6 +66,10 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly openBuild: () => void,
+    private readonly models: {
+      list: () => Promise<ModelOption[]>;
+      apply: (provider: ProviderId | "auto", model: string) => Promise<void>;
+    },
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
@@ -225,6 +230,12 @@ export class SidebarView implements vscode.WebviewViewProvider, ChatSurface {
       } else {
         log.warn(`Sidebar asked to connect an unknown pair: ${message.id}/${message.method}`);
       }
+    } else if (message.type === "requestModels") {
+      void this.models
+        .list()
+        .then((options) => this.post({ type: "modelOptions", options }));
+    } else if (message.type === "selectModel") {
+      void this.models.apply(message.provider, message.model);
     } else if (message.type === "disconnectProvider") {
       if (isProvider(message.id)) {
         void vscode.commands.executeCommand("ironbase.signOutProvider", message.id);

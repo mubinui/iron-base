@@ -21,6 +21,7 @@ import type {
   ComposerMode,
   ModelOption,
   PermissionCard,
+  SessionRow,
   ThreadItem,
 } from "../src/protocol";
 import { formatCost } from "../src/llm/modelLimits";
@@ -130,6 +131,7 @@ document.addEventListener("keydown", (event) => {
 function closePopovers(): void {
   closeModelMenu();
   closeModeMenu();
+  closeSessionMenu();
 }
 
 window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
@@ -246,6 +248,11 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
       fillModelMenu(message.options);
       break;
 
+    case "sessionList":
+      sessions = message.sessions;
+      fillSessionMenu();
+      break;
+
     case "filesPicked": {
       // The picker can be reopened to add more, so this merges rather than
       // replaces, and drops anything already on the list.
@@ -312,7 +319,7 @@ function renderHead(): void {
   } else {
     actions.append(
       iconButton("New build", "plus", () => vscode.postMessage({ type: "newSession" })),
-      iconButton("Past builds", "history", () => vscode.postMessage({ type: "switchSession" })),
+      historyButton(),
       // The sidebar is narrow; a long diff is easier to read across an editor.
       iconButton("Open in editor", "layers", () =>
         vscode.postMessage({ type: "command", command: "ironbase.buildInEditor" }),
@@ -916,6 +923,122 @@ function composerSignature(): string {
     onStartPage,
     attachments.join(","),
   ].join("|");
+}
+
+// --- Past builds -----------------------------------------------------------
+
+/**
+ * The saved builds, drawn in the panel rather than in a quick pick.
+ *
+ * A quick pick opens at the top of the window — a long way from the control
+ * that asked for it, and over the conversation it is offering to replace. This
+ * hangs off the button, filters as you type, and puts the destructive action
+ * behind a hover on its own row.
+ */
+let sessions: SessionRow[] = [];
+let sessionMenu: HTMLElement | undefined;
+let sessionFilter = "";
+
+function closeSessionMenu(): void {
+  sessionMenu?.remove();
+  sessionMenu = undefined;
+  sessionFilter = "";
+}
+
+function historyButton(): HTMLElement {
+  const node = el("button", undefined, "icon-button");
+  node.title = "Past builds";
+  node.setAttribute("aria-label", "Past builds");
+  node.append(icon("history", 16));
+  node.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (sessionMenu) {
+      closeSessionMenu();
+      return;
+    }
+    closeModelMenu();
+    closeModeMenu();
+    const menu = el("div", undefined, "popover session-menu");
+    menu.addEventListener("click", (inner) => inner.stopPropagation());
+    menu.append(el("div", "Loading builds…", "popover-empty"));
+    node.parentElement?.append(menu);
+    sessionMenu = menu;
+    vscode.postMessage({ type: "requestSessions" });
+  });
+  return node;
+}
+
+function fillSessionMenu(): void {
+  const menu = sessionMenu;
+  if (!menu) return;
+  menu.replaceChildren();
+
+  const search = document.createElement("input");
+  search.className = "session-search";
+  search.type = "text";
+  search.placeholder = "Search builds…";
+  search.value = sessionFilter;
+  search.addEventListener("input", () => {
+    sessionFilter = search.value;
+    renderSessionRows(menu);
+    // Rebuilding the rows must not take the caret with it.
+    search.focus();
+  });
+  search.addEventListener("keydown", (event) => event.stopPropagation());
+  menu.append(search);
+  menu.append(el("div", undefined, "session-rows"));
+  renderSessionRows(menu);
+  search.focus();
+}
+
+function renderSessionRows(menu: HTMLElement): void {
+  const rows = menu.querySelector<HTMLElement>(".session-rows");
+  if (!rows) return;
+  rows.replaceChildren();
+
+  const needle = sessionFilter.trim().toLowerCase();
+  const shown = needle
+    ? sessions.filter((entry) => entry.title.toLowerCase().includes(needle))
+    : sessions;
+
+  if (shown.length === 0) {
+    rows.append(
+      el("div", sessions.length === 0 ? "No saved builds yet." : "Nothing matches.", "popover-empty"),
+    );
+    return;
+  }
+
+  for (const entry of shown) {
+    const row = el("div", undefined, `session-row${entry.current ? " current" : ""}`);
+
+    const open = el("button", undefined, "open");
+    open.append(el("span", entry.title, "name"));
+    const meta = [
+      `${entry.messageCount} message${entry.messageCount === 1 ? "" : "s"}`,
+      entry.changedFiles > 0
+        ? `${entry.changedFiles} file${entry.changedFiles === 1 ? "" : "s"} changed`
+        : undefined,
+    ]
+      .filter((part): part is string => part !== undefined)
+      .join(" · ");
+    open.title = `${entry.title} — ${meta}`;
+    open.addEventListener("click", () => {
+      closeSessionMenu();
+      if (!entry.current) vscode.postMessage({ type: "openSession", id: entry.id });
+    });
+    row.append(open, el("span", entry.when, "when"));
+
+    const remove = el("button", undefined, "drop");
+    remove.title = `Delete ${entry.title}`;
+    remove.setAttribute("aria-label", `Delete ${entry.title}`);
+    remove.append(icon("trash", 13));
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      vscode.postMessage({ type: "deleteSession", id: entry.id });
+    });
+    row.append(remove);
+    rows.append(row);
+  }
 }
 
 // --- Modes -----------------------------------------------------------------
