@@ -85,6 +85,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register("ironbase.analyze", () => startRun({ kind: "review" })),
     register("ironbase.scalabilityCheck", startScalabilityCheck),
     register("ironbase.build", openBuildPanel),
+    register("ironbase.attachFiles", () => withBuildPanel((panel) => panel.attachFiles())),
     register("ironbase.newBuild", () => withBuildPanel((panel) => panel.newSession())),
     register("ironbase.switchBuild", () => withBuildPanel((panel) => panel.switchSession())),
     register("ironbase.exportBuild", () => withBuildPanel((panel) => panel.exportSession())),

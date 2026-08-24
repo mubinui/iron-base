@@ -889,7 +889,13 @@ export class ChatController {
    * path the agent is structurally unable to open. Saying so beats attaching
    * something that silently fails on the first read.
    */
+  /** Also reachable from the palette, which is how a dead button gets diagnosed. */
+  async attachFiles(): Promise<void> {
+    await this.pickFiles();
+  }
+
   private async pickFiles(): Promise<void> {
+    log.info("Attach: opening the picker.");
     // A quick pick rather than the native dialog. The dialog is a separate
     // window, and one opened from a focused webview can end up behind VS Code
     // on macOS — which looks exactly like a button that does nothing. This

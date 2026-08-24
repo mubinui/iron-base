@@ -28,6 +28,7 @@ export const ALLOWED_COMMANDS = [
   "ironbase.analyze",
   "ironbase.scalabilityCheck",
   "ironbase.build",
+  "ironbase.attachFiles",
   "ironbase.newBuild",
   "ironbase.switchBuild",
   "ironbase.exportBuild",
