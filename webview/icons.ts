@@ -53,6 +53,7 @@ export type IconName =
   | "alert"
   | "chevron"
   | "back"
+  | "gear"
   | "file"
   | "folder"
   | "layers"
@@ -444,6 +445,23 @@ const GLYPHS: Record<IconName, Glyph> = {
   chevron: {
     box: 24,
     strokes: ["M9 5 L16 12 L9 19"],
+  },
+  /**
+   * Accounts, reviews and everything that is not the conversation.
+   *
+   * A cog rather than an arrow: the control leaves the conversation for a
+   * screen where accounts are added and models are chosen, and an arrow only
+   * says "back" — it never says what you are going back to. Six teeth rather
+   * than the usual eight because this renders at 15px, where eight blur into
+   * a circle.
+   */
+  gear: {
+    box: 24,
+    strokes: [
+      "M18.49 9.38 L21.07 9.74 L21.07 14.26 L18.49 14.62 L17.52 16.31 L18.50 18.73 L14.58 20.99 L12.97 18.93 L11.03 18.93 L9.42 20.99 L5.50 18.73 L6.48 16.31 L5.51 14.62 L2.93 14.26 L2.93 9.74 L5.51 9.38 L6.48 7.69 L5.50 5.27 L9.42 3.01 L11.03 5.07 L12.97 5.07 L14.58 3.01 L18.50 5.27 L17.52 7.69 Z",
+    ],
+    circles: [{ cx: 12, cy: 12, r: 2.75 }],
+    width: 1.5,
   },
   /**
    * Back to the accounts screen.

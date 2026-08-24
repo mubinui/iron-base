@@ -430,8 +430,12 @@ function actionTile(
   const tile = el("button", undefined, `tile${variant === "primary" ? " primary" : ""}`);
   const mark = el("span", undefined, "mark");
   mark.append(icon(glyph, 17));
-  const body = el("span", undefined, "body");
-  body.append(el("span", title, "name"), el("span", line, "line"));
+  // Blocks rather than spans throughout: if the stylesheet has not arrived —
+  // an extension updated under a running window is the way that happens — the
+  // title and its sentence still land on separate lines instead of running
+  // together into one unreadable paragraph.
+  const body = el("div", undefined, "body");
+  body.append(el("div", title, "name"), el("div", line, "line"));
   const go = el("span", undefined, "go");
   go.append(icon("chevron", 13));
   tile.append(mark, body, go);

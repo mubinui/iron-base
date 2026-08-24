@@ -238,14 +238,15 @@ function renderHead(): void {
 
   const top = el("div", undefined, "head-row");
 
-  // Back to the accounts screen. The panel opens straight into the
-  // conversation when an account is connected, so this is the only route to
-  // the place where accounts are added and switched — which is why it is a
-  // marked control rather than one more grey glyph in a row of them.
+  // Out to the accounts screen. The panel opens straight into the conversation
+  // when an account is connected, so this is the only route to the place where
+  // accounts are added and models are chosen — which is why it is a marked
+  // control rather than one more grey glyph, and a cog rather than an arrow.
+  // An arrow says "back"; it never says what you are going back to.
   const back = el("button", undefined, "back-btn");
-  back.title = "Accounts, reviews and past builds";
-  back.setAttribute("aria-label", "Back to accounts");
-  back.append(icon("back", 15));
+  back.title = "Accounts, models and reviews";
+  back.setAttribute("aria-label", "Accounts and settings");
+  back.append(icon("gear", 15));
   back.addEventListener("click", () =>
     vscode.postMessage({ type: "command", command: "ironbase.buildHome" }),
   );

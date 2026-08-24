@@ -174,7 +174,7 @@ export function capabilityList(): HTMLElement {
     const mark = el("span", undefined, "mark");
     mark.append(icon(item.glyph, 15));
     const body = el("div", undefined, "body");
-    body.append(el("span", item.title, "name"), el("span", item.line, "line"));
+    body.append(el("div", item.title, "name"), el("div", item.line, "line"));
     row.append(mark, body);
     list.append(row);
   }
