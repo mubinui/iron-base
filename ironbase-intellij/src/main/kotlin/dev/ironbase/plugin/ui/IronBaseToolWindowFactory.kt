@@ -9,7 +9,7 @@ import com.intellij.ui.content.ContentFactory
 class IronBaseToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val content = ContentFactory.getInstance()
-            .createContent(ChatPanel(), /* displayName = */ "", /* isLockable = */ false)
+            .createContent(ChatPanel(project), /* displayName = */ "", /* isLockable = */ false)
         toolWindow.contentManager.addContent(content)
     }
 }

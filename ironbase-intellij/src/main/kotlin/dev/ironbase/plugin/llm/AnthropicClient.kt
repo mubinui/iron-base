@@ -12,13 +12,12 @@ import java.time.Duration
 /**
  * A minimal, streaming Anthropic Messages API client — API key auth only.
  *
- * This is a deliberately narrow port of `AnthropicClient` in the VS Code
- * extension's `src/llm/anthropicClient.ts`: no OAuth (the PKCE flow and its
- * browser-based capture belong with porting the auth manager, not the LLM
- * client), no tool calling, no prompt caching, no retry-on-401. What it does
- * do — send a conversation, stream the reply back token by token, surface a
- * readable error when the API rejects the request — is the one path the
- * skeleton's chat panel needs end to end.
+ * A narrow port of `AnthropicClient` in the VS Code extension's
+ * `src/llm/anthropicClient.ts`: no OAuth (the PKCE flow and its browser-based
+ * capture belong with porting the auth manager, not the LLM client), no
+ * prompt caching, no retry-on-401. Tool calling is ported, since the agent
+ * loop needs it — text and tool-use blocks both stream, and this assembles
+ * both before handing back a settled `ChatTurnResult`.
  */
 class AnthropicClient(private val apiKey: String, private val model: String) {
 
@@ -29,34 +28,21 @@ class AnthropicClient(private val apiKey: String, private val model: String) {
     /**
      * Sends the conversation and streams the reply.
      *
-     * `onEvent` is called from this method's own thread — the caller is on a
-     * background thread already (see `ChatPanel`), so this never touches the
-     * EDT. `isCancelled` is polled between SSE blocks, which is as fine-
-     * grained as cancellation gets without threading a real interrupt through
-     * the HTTP client.
+     * `onEvent` fires from this method's own thread — the caller is already on
+     * a background thread (see `ChatPanel`/`AgentLoop`), so this never touches
+     * the EDT. The return value is the settled turn: the full text, and any
+     * tool calls the model made, once the stream has actually finished —
+     * there is nothing useful to act on from a tool call until its arguments
+     * have fully arrived.
      */
-    fun chat(
-        history: List<ChatMessage>,
-        onEvent: (StreamEvent) -> Unit,
+    fun send(
+        history: List<Turn>,
+        tools: List<ToolDef> = emptyList(),
+        system: String? = null,
+        onEvent: (StreamEvent) -> Unit = {},
         isCancelled: () -> Boolean = { false },
-    ) {
-        val body = MiniJson.obj(
-            "model" to model,
-            "max_tokens" to 4096,
-            "stream" to true,
-            "messages" to MiniJson.RawJson(
-                MiniJson.arr(
-                    history.map { m ->
-                        MiniJson.RawJson(
-                            MiniJson.obj(
-                                "role" to if (m.role == ChatMessage.Role.USER) "user" else "assistant",
-                                "content" to m.text,
-                            ),
-                        )
-                    },
-                ),
-            ),
-        )
+    ): ChatTurnResult {
+        val body = AnthropicWireFormat.requestBody(history, tools, model, MAX_TOKENS, system)
 
         val request = HttpRequest.newBuilder(URI.create(API_URL))
             .header("content-type", "application/json")
@@ -73,54 +59,68 @@ class AnthropicClient(private val apiKey: String, private val model: String) {
 
         if (response.statusCode() !in 200..299) {
             val text = response.body().bufferedReader(StandardCharsets.UTF_8).readText()
-            throw LlmException(errorMessageFrom(text, response.statusCode()), response.statusCode())
+            throw LlmException(AnthropicWireFormat.errorMessageFrom(text, response.statusCode()), response.statusCode())
         }
 
-        var inputTokens = 0
-        var outputTokens = 0
+        var text = StringBuilder()
+        var stopReason = "end_turn"
+        // Keyed by content-block index, same as the TS client: a tool call's
+        // arguments stream in as fragments of one JSON object, one
+        // `input_json_delta` at a time, and there is nothing valid to parse
+        // until `content_block_stop` closes it out.
+        val toolCallsByIndex = LinkedHashMap<Int, PendingToolCall>()
 
         BufferedReader(InputStreamReader(response.body(), StandardCharsets.UTF_8)).use { reader ->
             for (msg in readSse(reader)) {
-                if (isCancelled()) return
+                if (isCancelled()) break
                 val payload = MiniJson.parse(msg.data)
                 when (payload.get("type").asString()) {
-                    "message_start" -> {
-                        inputTokens = payload.get("message").get("usage").get("input_tokens").asInt() ?: 0
+                    "content_block_start" -> {
+                        val index = payload.get("index").asInt() ?: continue
+                        val block = payload.get("content_block")
+                        if (block.get("type").asString() == "tool_use") {
+                            val name = block.get("name").asString() ?: ""
+                            toolCallsByIndex[index] = PendingToolCall(block.get("id").asString() ?: "", name)
+                            onEvent(StreamEvent.ToolCallStarted(name))
+                        }
                     }
                     "content_block_delta" -> {
+                        val index = payload.get("index").asInt() ?: continue
                         val delta = payload.get("delta")
-                        if (delta.get("type").asString() == "text_delta") {
-                            onEvent(StreamEvent.Text(delta.get("text").asString() ?: ""))
+                        when (delta.get("type").asString()) {
+                            "text_delta" -> {
+                                val chunk = delta.get("text").asString() ?: ""
+                                text.append(chunk)
+                                onEvent(StreamEvent.Text(chunk))
+                            }
+                            "input_json_delta" -> {
+                                toolCallsByIndex[index]?.let { it.json.append(delta.get("partial_json").asString() ?: "") }
+                            }
                         }
                     }
                     "message_delta" -> {
-                        outputTokens = payload.get("usage").get("output_tokens").asInt() ?: outputTokens
+                        payload.get("delta").get("stop_reason").asString()?.let { stopReason = it }
                     }
-                    "message_stop" -> {
-                        onEvent(StreamEvent.Done(inputTokens, outputTokens))
-                    }
-                    else -> Unit // content_block_start/stop, ping — nothing this skeleton renders
+                    "message_stop" -> Unit // the loop ends naturally when the body closes
+                    else -> Unit // message_start, content_block_stop, ping — nothing more to capture
                 }
             }
         }
+
+        return ChatTurnResult(
+            text = text.toString(),
+            toolCalls = toolCallsByIndex.values.map { ToolCall(it.id, it.name, it.json.toString()) },
+            stopReason = stopReason,
+        )
     }
 
-    /**
-     * Anthropic's error envelope is `{"type":"error","error":{"type":...,
-     * "message":...}}`; anything that does not parse that way (a proxy's
-     * plain-text 502, an HTML challenge page) falls back to a snippet of the
-     * raw body rather than a bare stack trace.
-     */
-    private fun errorMessageFrom(body: String, status: Int): String {
-        val parsed = runCatching { MiniJson.parse(body) }.getOrNull()
-        val apiMessage = parsed?.get("error")?.get("message")?.asString()
-        if (apiMessage != null) return apiMessage
-        val snippet = body.trim().take(200).replace(Regex("\\s+"), " ")
-        return "Anthropic returned HTTP $status${if (snippet.isNotEmpty()) ": $snippet" else ""}"
+    private class PendingToolCall(val id: String, val name: String) {
+        val json = StringBuilder()
     }
 
     private companion object {
         const val API_URL = "https://api.anthropic.com/v1/messages"
         const val API_VERSION = "2023-06-01"
+        const val MAX_TOKENS = 4096
     }
 }

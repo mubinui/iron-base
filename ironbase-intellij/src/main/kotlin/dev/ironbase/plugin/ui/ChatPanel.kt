@@ -1,15 +1,17 @@
 package dev.ironbase.plugin.ui
 
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.JBUI
+import dev.ironbase.plugin.engine.AgentLoop
 import dev.ironbase.plugin.llm.AnthropicClient
-import dev.ironbase.plugin.llm.ChatMessage
 import dev.ironbase.plugin.llm.LlmException
-import dev.ironbase.plugin.llm.StreamEvent
+import dev.ironbase.plugin.llm.Turn
 import dev.ironbase.plugin.settings.CredentialStore
 import java.awt.BorderLayout
 import java.awt.Color
@@ -18,18 +20,20 @@ import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JComboBox
-import javax.swing.JPasswordField
 import javax.swing.JPanel
+import javax.swing.JPasswordField
 import javax.swing.SwingUtilities
 
 /**
- * The tool window's whole UI: connect an account, then talk to it.
+ * The tool window's whole UI: connect an account, then talk to it about the
+ * open project.
  *
- * Everything the VS Code panel's build conversation does beyond this — the
- * tool trace, planning versus building, permission prompts, checkpoint and
- * undo — belongs to the engine layer, which has not been ported (see the
- * module README). This is the one path that is real: type a message, get a
- * streamed reply back from the model you connected.
+ * Everything the VS Code panel's build conversation does beyond this — plan
+ * versus build, the tool trace's real UI, permission prompts, checkpoint and
+ * undo, writing files at all — belongs to the engine layer this has only
+ * partly ported (see the module README). What is real: the model can read
+ * files, list directories and search the project through `AgentLoop`, and
+ * you can watch it do that while it answers.
  *
  * A plain Swing tree rather than a JCEF-embedded copy of the VS Code webview.
  * JCEF gets closer to that panel's actual look, but it is a bundled Chromium
@@ -38,9 +42,9 @@ import javax.swing.SwingUtilities
  * that would ship invisibly in a skeleton nobody can click through yet.
  * Swing is plain enough to read correctly by inspection.
  */
-class ChatPanel : JPanel(BorderLayout()) {
+class ChatPanel(private val project: Project) : JPanel(BorderLayout()) {
 
-    private val history = mutableListOf<ChatMessage>()
+    private val history = mutableListOf<Turn>()
     private val transcript = JBTextArea().apply {
         isEditable = false
         lineWrap = true
@@ -53,13 +57,15 @@ class ChatPanel : JPanel(BorderLayout()) {
     private val apiKeyField = JPasswordField()
     private val modelBox = JComboBox(arrayOf("claude-opus-5", "claude-sonnet-5", "claude-haiku-4"))
 
+    /** Set while a tool's activity line is open, waiting for its result. */
+    private var toolLineOpen = false
+
     init {
         add(buildAccountBar(), BorderLayout.NORTH)
         add(JBScrollPane(transcript), BorderLayout.CENTER)
         add(buildComposer(), BorderLayout.SOUTH)
 
         CredentialStore.getApiKey()?.let { apiKeyField.text = it }
-        renderTranscript()
     }
 
     // --- Layout ------------------------------------------------------------
@@ -119,47 +125,43 @@ class ChatPanel : JPanel(BorderLayout()) {
             setStatus("Set a Claude API key above first.", error = true)
             return
         }
+        val root = project.basePath?.let { LocalFileSystem.getInstance().findFileByPath(it) }
+        if (root == null) {
+            setStatus("Could not find this project's root folder.", error = true)
+            return
+        }
 
-        history.add(ChatMessage(ChatMessage.Role.USER, text))
-        // The assistant's turn is added empty and grown in place as the reply
-        // streams in, so `renderTranscript` never has to know it is mid-turn.
-        val assistantTurn = ChatMessage(ChatMessage.Role.ASSISTANT, "")
-        history.add(assistantTurn)
+        appendLine("You:")
+        appendLine(text)
+        appendRaw("\nIronBase:\n")
+        history.add(Turn.User(text))
         input.text = ""
-        renderTranscript()
         setBusy(true)
 
         val model = (modelBox.editor.item as? String)?.trim().orEmpty().ifEmpty { "claude-opus-5" }
-        val client = AnthropicClient(apiKey, model)
-        val sentTurns = history.dropLast(1) // the empty assistant turn carries nothing to send
+        val loop = AgentLoop(AnthropicClient(apiKey, model), root)
 
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
-                client.chat(sentTurns, onEvent = { event ->
-                    SwingUtilities.invokeLater {
-                        when (event) {
-                            is StreamEvent.Text -> {
-                                val index = history.lastIndex
-                                history[index] = history[index].copy(text = history[index].text + event.delta)
-                                renderTranscript()
-                            }
-                            is StreamEvent.Done -> {
-                                setBusy(false)
-                                setStatus(
-                                    "${event.inputTokens} in / ${event.outputTokens} out tokens.",
-                                    error = false,
-                                )
-                            }
-                        }
-                    }
-                })
+                loop.run(
+                    history = history,
+                    onProgress = { progress ->
+                        SwingUtilities.invokeLater { render(progress) }
+                    },
+                )
+                SwingUtilities.invokeLater {
+                    appendRaw("\n\n")
+                    setBusy(false)
+                }
             } catch (err: LlmException) {
                 SwingUtilities.invokeLater {
+                    appendRaw("\n")
                     setBusy(false)
                     setStatus(err.message ?: "The request failed.", error = true)
                 }
             } catch (err: Exception) {
                 SwingUtilities.invokeLater {
+                    appendRaw("\n")
                     setBusy(false)
                     setStatus("Unexpected error: ${err.message}", error = true)
                 }
@@ -167,10 +169,29 @@ class ChatPanel : JPanel(BorderLayout()) {
         }
     }
 
+    /** Applies one `AgentLoop.Progress` event to the transcript. Always on the EDT. */
+    private fun render(progress: AgentLoop.Progress) {
+        when (progress) {
+            is AgentLoop.Progress.Text -> appendRaw(progress.delta)
+            is AgentLoop.Progress.ToolStarted -> {
+                if (toolLineOpen) appendRaw("\n")
+                appendRaw("  → ${progress.name} ${progress.summary}".trimEnd())
+                toolLineOpen = true
+            }
+            is AgentLoop.Progress.ToolFinished -> {
+                if (progress.note != null) {
+                    appendRaw(if (progress.ok) " — ${progress.note}" else " — ${progress.note} (failed)")
+                }
+                appendRaw("\n")
+                toolLineOpen = false
+            }
+        }
+    }
+
     private fun setBusy(busy: Boolean) {
         sendButton.isEnabled = !busy
         input.isEnabled = !busy
-        if (busy) setStatus("Waiting for a reply…", error = false)
+        if (busy) setStatus("Working…", error = false) else setStatus(" ", error = false)
     }
 
     private fun setStatus(text: String, error: Boolean) {
@@ -180,12 +201,10 @@ class ChatPanel : JPanel(BorderLayout()) {
 
     // --- Rendering -----------------------------------------------------
 
-    private fun renderTranscript() {
-        val text = history.joinToString("\n\n") { turn ->
-            val who = if (turn.role == ChatMessage.Role.USER) "You" else "IronBase"
-            "$who:\n${turn.text}"
-        }
-        transcript.text = text
+    private fun appendLine(text: String) = appendRaw("$text\n")
+
+    private fun appendRaw(text: String) {
+        transcript.append(text)
         transcript.caretPosition = transcript.document.length
     }
 }

@@ -8,15 +8,19 @@ platforms could not simply share code.
 ## What actually works
 
 Open the **IronBase** tool window (right-hand sidebar), paste a Claude API
-key, press **Save**, type a message, press Enter. The message goes to the
-Anthropic Messages API and the reply streams back token by token. That is
-the one path this skeleton exercises end to end.
+key, press **Save**, ask it something about the open project, press Enter.
+It can read files, list directories and search file contents — via
+`AgentLoop` and `WorkspaceTools` — before it answers, and you can watch it
+do that: each call shows as a line ("→ read_file src/Foo.kt — 218 lines")
+while the reply streams in around it.
 
 Nothing else from the VS Code extension is here: no planning-before-writing,
-no tool trace, no permission prompts, no checkpoint/undo, no project
-indexer, no architecture review, no scalability check, no OAuth sign-in, no
-providers besides Claude by API key. Building those out is real work on top
-of this, not a flag to flip — see "What porting the rest looks like" below.
+no writing or editing a file, no permission prompts, no checkpoint/undo, no
+project *index* (these tools walk the live file system, not a built index —
+`find_relevant`/`list_signals` are not ported), no architecture review, no
+scalability check, no OAuth sign-in, no providers besides Claude by API key.
+Building those out is real work on top of this, not a flag to flip — see
+"What porting the rest looks like" below.
 
 ## Why this is a second implementation, not a port
 
@@ -38,13 +42,15 @@ punctuation.
 
 What *did* port directly, as ideas even where the code is new:
 
-| VS Code extension | This plugin | |
-|---|---|---|
-| `vscode.SecretStorage` | `PasswordSafe` | `settings/CredentialStore.kt` |
-| `src/llm/anthropicClient.ts` | — | `llm/AnthropicClient.kt` (API key only, no OAuth, no tools) |
-| `src/llm/sse.ts` | — | `llm/Sse.kt` |
-| `src/llm/types.ts` (the neutral message shapes) | — | `llm/NeutralTypes.kt` |
-| the build panel's webview | — | `ui/ChatPanel.kt` (Swing, not a webview) |
+| VS Code extension | This plugin |
+|---|---|
+| `vscode.SecretStorage` | `PasswordSafe` — `settings/CredentialStore.kt` |
+| `src/llm/anthropicClient.ts` | `llm/AnthropicClient.kt` + `llm/AnthropicWireFormat.kt` (API key only, no OAuth) |
+| `src/llm/sse.ts` | `llm/Sse.kt` |
+| `src/llm/types.ts` (the neutral message shapes) | `llm/NeutralTypes.kt` — now a `Turn` union (user/assistant/tool-results), since a tool loop needs to replay what a tool was asked and what it answered |
+| `src/engine/tools.ts` — `read_file`, `list_dir`, `search` only | `engine/WorkspaceTools.kt`, against `VirtualFile` instead of `vscode.workspace.fs` |
+| `src/engine/codingSession.ts`'s `runTools` (the read-only slice) | `engine/AgentLoop.kt` — sequential, not the original's parallel-reads fan-out |
+| the build panel's webview | `ui/ChatPanel.kt` (Swing, not a webview) |
 
 ### Swing, not JCEF
 
@@ -77,8 +83,19 @@ version boundary.
 ```bash
 ./gradlew buildPlugin   # assembles build/distributions/ironbase-intellij-*.zip
 ./gradlew runIde        # launches a sandboxed IDE with the plugin installed
-./gradlew test          # runs the unit tests (MiniJson's read/write shapes)
+./gradlew test          # runs the unit tests — 22, none require a display
 ```
+
+Two kinds of test, deliberately kept apart. `MiniJsonTest` and
+`AnthropicWireFormatTest` are plain JUnit — no platform, no network, just the
+serialization logic. `WorkspaceToolsTest` runs against
+`BasePlatformTestCase`, a real headless IDE fixture with an actual
+`VirtualFile` tree and real `ReadAction`s: the only way to genuinely verify
+code that touches the VFS without a display, which is what let this be
+checked for real in a session with no way to launch the IDE and click
+through it — and it caught a real bug (`resolve()` telling a request for a
+file that had simply never existed that it was "outside the workspace",
+because both cases collapsed to the same `null`) before it shipped.
 
 The Gradle wrapper is committed, so no local Gradle install is required —
 only a JDK. `runIde` downloads and launches IntelliJ IDEA Community
@@ -94,25 +111,28 @@ platform's usual JDK install is enough if none is found.
 Roughly the order the coupling above suggests, each a real chunk of work on
 its own:
 
-1. **OAuth sign-in** (Claude, ChatGPT, Gemini) — PKCE plus a loopback HTTP
+1. **Writing** — `edit_file`, `write_file`, `delete_file`. The read-only
+   three are done; these are the ones that need a permission prompt in front
+   of them before they run, which does not exist yet either.
+2. **The checkpoint/undo system** — IntelliJ's own `LocalHistory` may cover
+   part of what `src/engine/checkpoint.ts` does by hand; worth checking
+   before reimplementing it.
+3. **Running commands** — `run_command`, backed by `GeneralCommandLine`
+   instead of `child_process`, plus the command-guard denylist from
+   `src/engine/commandGuard.ts`.
+4. **OAuth sign-in** (Claude, ChatGPT, Gemini) — PKCE plus a loopback HTTP
    listener for the redirect. `com.intellij.credentialStore` already
    answers the "where does the token live" half; the flow itself needs
    writing.
-2. **The project indexer** (`src/memory/`) — walks the workspace, extracts
-   symbols and signals. The VS Code version leans on `vscode.workspace.fs`
-   and `vscode.workspace.findFiles`; the IntelliJ equivalents are
-   `VirtualFile` and `FilenameIndex`/`ProjectFileIndex`, which is a
-   different traversal model, not a search-and-replace.
-3. **The tool-calling engine** (`src/engine/`) — `read_file`, `edit_file`,
-   `run_command` and the rest, each backed by `VirtualFile` I/O and
-   `GeneralCommandLine` instead of `vscode.workspace.fs` and
-   `child_process`.
-4. **The checkpoint/undo system** — IntelliJ's own `LocalHistory` may cover
-   part of what `src/engine/checkpoint.ts` does by hand; worth checking
-   before reimplementing it.
-5. **The chat UI itself** — once the engine exists, decide for real whether
-   Swing keeps up with a live tool trace and streaming diffs, or whether
-   that is where JCEF becomes worth its complexity.
+5. **The project indexer** (`src/memory/`) — what `find_relevant` and
+   `list_signals` answer from instead of walking the live disk on every
+   call, the way `WorkspaceTools.search` does now. The VS Code version
+   leans on `vscode.workspace.findFiles`; the IntelliJ equivalent is
+   `FilenameIndex`/`ProjectFileIndex`, a different traversal model, not a
+   search-and-replace.
+6. **The chat UI itself** — now that there is a real tool trace to show,
+   decide for real whether Swing keeps up with it and with streaming diffs,
+   or whether that is where JCEF becomes worth its complexity.
 
 Each of those is independently useful and independently testable — a
 reasonable place to stop and check in, not a stretch goal to reach in one
