@@ -175,14 +175,17 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
       scrollToEnd();
       break;
 
-    case "append":
+    case "append": {
+      const settle = stickToEnd();
       dropEmptyState();
       appendItem(message.item);
       if (message.item.kind === "plan") syncPlanActions();
-      scrollToEnd();
+      settle();
       break;
+    }
 
     case "assistantDelta": {
+      const settle = stickToEnd();
       dropEmptyState();
       if (!streamingBubble) {
         streamingBubble = el("div", undefined, "assistant");
@@ -192,15 +195,20 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
       const raw = (streamingBubble.dataset.raw ?? "") + message.delta;
       streamingBubble.dataset.raw = raw;
       streamingBubble.replaceChildren(renderMarkdown(raw));
-      scrollToEnd();
+      settle();
       break;
     }
 
     case "commandOutput": {
       const node = commandNodes.get(message.id);
       if (node) {
+        // The card's own pane follows its output; the thread has to follow the
+        // card, which it was not doing at all — a long test run scrolled off
+        // the bottom while it was still printing.
+        const settle = stickToEnd();
         node.out.textContent = (node.out.textContent ?? "") + message.chunk;
         node.out.scrollTop = node.out.scrollHeight;
+        settle();
       }
       break;
     }
@@ -215,7 +223,9 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
     }
 
     case "toolEnd": {
+      const settle = stickToEnd();
       settleTraceRow(message.id, message.note, message.ok);
+      settle();
       break;
     }
 
@@ -224,11 +234,14 @@ window.addEventListener("message", (event: MessageEvent<ChatHostMessage>) => {
       renderTodos();
       break;
 
-    case "permission":
+    case "permission": {
+      // A question always comes into view: it is the one thing that stops the
+      // build until it is answered.
       dropEmptyState();
       thread.append(permissionCard(message.request));
       scrollToEnd();
       break;
+    }
 
     case "permissionClosed": {
       const node = askNodes.get(message.id);
@@ -1462,9 +1475,28 @@ function formatTokens(n: number): string {
 }
 
 /** Sticks to the bottom only when the reader is already there. */
+/**
+ * Keeps the view on the end of the conversation while it is being written.
+ *
+ * The check has to happen BEFORE the thread grows, which is the whole point:
+ * measuring afterwards asks "am I near the bottom" of a column that a diff card
+ * or a burst of output has just made several hundred pixels taller, and the
+ * answer is always no. The build then wrote on out of sight, which is exactly
+ * when someone is watching it.
+ *
+ * Snapshotting first also preserves the thing the threshold is for: someone who
+ * has genuinely scrolled up to read is left where they are.
+ */
+function stickToEnd(): () => void {
+  const wasAtEnd = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160;
+  return () => {
+    if (wasAtEnd) thread.scrollTop = thread.scrollHeight;
+  };
+}
+
+/** Unconditional: a replay has no scroll position worth keeping. */
 function scrollToEnd(): void {
-  const nearBottom = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 160;
-  if (nearBottom) thread.scrollTop = thread.scrollHeight;
+  thread.scrollTop = thread.scrollHeight;
 }
 
 function el(tag: string, text?: string, className?: string): HTMLElement {

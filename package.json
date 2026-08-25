@@ -2,7 +2,7 @@
   "name": "ironbase",
   "displayName": "IronBase — AI Coding Agent",
   "description": "An AI coding agent that starts from your architecture. Plans a change, you approve it, then it writes the code and runs your tests — plus a full architecture review with a dependency map. Runs on the Claude, ChatGPT, or Gemini account you already have.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "mubinuic",
   "license": "MIT",
   "repository": {

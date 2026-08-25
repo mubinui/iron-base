@@ -358,6 +358,11 @@ async function startRun(mode: RunMode): Promise<void> {
   const source = new vscode.CancellationTokenSource();
   activeRun = source;
   lastRoot = folder.uri;
+  // A review reports on the home screen, and the panel opens into the
+  // conversation now — so without this the run happens with nothing on screen
+  // to show for it. Every progress event below goes through `setState`, which
+  // the build screen has no case for.
+  sidebar.showHome();
   sidebar.reveal();
   const runStartedAt = Date.now();
   let lastUsage: { inputTokens: number; outputTokens: number; budget: number } | undefined;
