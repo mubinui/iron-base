@@ -1,0 +1,27 @@
+<idea-plugin>
+    <id>dev.ironbase.plugin</id>
+    <name>IronBase</name>
+    <vendor url="https://github.com/mubinui/iron-base">IronBase</vendor>
+
+    <description><![CDATA[
+        <p>An AI coding agent that starts from your architecture — ported here
+        from the VS Code extension of the same name.</p>
+        <p><b>This build is a skeleton, not a full port.</b> Chat with a
+        connected Claude account works end to end: sign in with an API key,
+        send a message, watch the reply stream in. The rest of the VS Code
+        extension — planning and writing code, the tool trace, checkpoint and
+        undo, the project indexer, the architecture review — has not been
+        ported yet. See the plugin's README for what is and is not here.</p>
+    ]]></description>
+
+    <!-- The platform module alone is enough: nothing here needs a language
+         plugin, a VCS integration, or anything Ultimate-only. -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="IronBase"
+                    anchor="right"
+                    icon="/icons/ironbase.svg"
+                    factoryClass="dev.ironbase.plugin.ui.IronBaseToolWindowFactory"/>
+    </extensions>
+</idea-plugin>

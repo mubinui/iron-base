@@ -1,0 +1,9 @@
+<!-- Tool window icon, light theme. Same stepped-mark silhouette as the VS
+     Code activity bar icon (media/icon.svg), scaled to the 13x13 grid a
+     tool window icon renders at, and given a fixed dark fill since
+     IconLoader picks this file — not a currentColor one — for light themes. -->
+<svg width="13" height="13" viewBox="0 0 13 13" xmlns="http://www.w3.org/2000/svg">
+  <rect x="3.79" y="2.17" width="5.42" height="2.11" rx="0.81" fill="#4C4C4C"/>
+  <rect x="2.71" y="5.52" width="7.58" height="2.11" rx="0.87" fill="#4C4C4C"/>
+  <rect x="1.90" y="8.88" width="9.21" height="2.27" rx="0.97" fill="#4C4C4C"/>
+</svg>
